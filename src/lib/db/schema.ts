@@ -66,6 +66,17 @@ export const budgetCategoryEnum = pgEnum("budget_category", [
   "other",
 ]);
 
+export const documentCategoryEnum = pgEnum("document_category", [
+  "entry_form",
+  "supp_regs",
+  "bulletin",
+  "schedule",
+  "roadbook",
+  "gpx",
+  "receipt",
+  "other",
+]);
+
 // ---------- domain ----------
 
 export const teams = pgTable("teams", {
@@ -641,6 +652,115 @@ export const expenseEntries = pgTable(
   }),
 );
 
+// ---------- Phase 7: documents ----------
+//
+// A "document" is a logical, named container scoped to (team, event,
+// category, name). Each upload creates a new DocumentVersion row pointing at
+// an object in R2. Re-uploading the same logical name appends a new version
+// and computes a structured diff against the previous version (if both
+// have extractable text). Versions are immutable; deletions soft-delete the
+// document. Acknowledgments are per (user, document) — flagged "must ack"
+// at the document level.
+
+export const documents = pgTable(
+  "documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id").references(() => events.id, {
+      onDelete: "cascade",
+    }),
+    // Optional polymorphic links — set when the doc is attached to a specific
+    // resource (a stage's road book, an expense's receipt photo, etc.).
+    stageId: uuid("stage_id").references(() => eventStages.id, {
+      onDelete: "set null",
+    }),
+    expenseId: uuid("expense_id").references(() => expenseEntries.id, {
+      onDelete: "set null",
+    }),
+    category: documentCategoryEnum("category").notNull(),
+    /** Logical name; re-uploading with the same (event, category, name) appends a version. */
+    name: text("name").notNull(),
+    mustAcknowledge: boolean("must_acknowledge").notNull().default(false),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamEventIdx: index("documents_team_event_idx").on(t.teamId, t.eventId),
+    logicalUniq: uniqueIndex("documents_logical_uniq").on(
+      t.teamId,
+      t.eventId,
+      t.category,
+      t.name,
+    ),
+  }),
+);
+
+export const documentVersions = pgTable(
+  "document_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    versionNumber: integer("version_number").notNull(),
+    /** R2 object key; we store the path, not the URL. */
+    storageKey: text("storage_key").notNull(),
+    contentType: text("content_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    /** Extracted text for diff computation. Null for non-text formats (e.g., GPX, image). */
+    extractedText: text("extracted_text"),
+    /** Cached structured diff against the immediately prior version. JSON-serialized StructuredDiff. */
+    diffJson: text("diff_json"),
+    uploadedByUserId: uuid("uploaded_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    documentVersionUniq: uniqueIndex("document_versions_doc_version_uniq").on(
+      t.teamId,
+      t.documentId,
+      t.versionNumber,
+    ),
+  }),
+);
+
+export const documentAcknowledgments = pgTable(
+  "document_acknowledgments",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => documents.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** The version that was acknowledged. New versions reset the ack. */
+    versionId: uuid("version_id")
+      .notNull()
+      .references(() => documentVersions.id, { onDelete: "cascade" }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.documentId, t.userId] }),
+    versionIdx: index("document_acknowledgments_version_idx").on(
+      t.teamId,
+      t.versionId,
+    ),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -744,6 +864,14 @@ export type NewBudgetLine = typeof budgetLines.$inferInsert;
 export type ExpenseEntry = typeof expenseEntries.$inferSelect;
 export type NewExpenseEntry = typeof expenseEntries.$inferInsert;
 export type BudgetCategory = (typeof budgetCategoryEnum.enumValues)[number];
+
+export type Document = typeof documents.$inferSelect;
+export type NewDocument = typeof documents.$inferInsert;
+export type DocumentVersion = typeof documentVersions.$inferSelect;
+export type NewDocumentVersion = typeof documentVersions.$inferInsert;
+export type DocumentAcknowledgment = typeof documentAcknowledgments.$inferSelect;
+export type NewDocumentAcknowledgment = typeof documentAcknowledgments.$inferInsert;
+export type DocumentCategory = (typeof documentCategoryEnum.enumValues)[number];
 
 // boolean export to silence unused import warnings if added later
 void boolean;

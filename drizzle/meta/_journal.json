@@ -50,6 +50,13 @@
       "when": 1777781646546,
       "tag": "0006_puzzling_sandman",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777783126169,
+      "tag": "0007_fluffy_jackpot",
+      "breakpoints": true
     }
   ]
 }

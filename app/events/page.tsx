@@ -4,7 +4,15 @@ import { revalidatePath } from "next/cache";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { budgetLines, events, expenseEntries } from "@/lib/db/schema";
+import {
+  budgetLines,
+  documentAcknowledgments,
+  documentVersions,
+  documents,
+  events,
+  expenseEntries,
+} from "@/lib/db/schema";
+import { DOCUMENT_CATEGORY_LABEL } from "@/lib/documents";
 import { getCurrentUser, requireChief } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { instantiateChecklistsForEvent } from "@/lib/checklists";
@@ -60,6 +68,32 @@ export default async function EventsPage() {
       ),
     )
     .groupBy(expenseEntries.category);
+
+  // Documents the current user must acknowledge but hasn't (or has acked
+  // an older version). One row per stale doc.
+  const pendingAcks = await db
+    .select({
+      id: documents.id,
+      name: documents.name,
+      category: documents.category,
+      eventId: documents.eventId,
+      eventName: events.name,
+      latestVersionNumber: sql<number>`(SELECT version_number FROM ${documentVersions} v WHERE v.team_id = ${documents.teamId} AND v.document_id = ${documents.id} ORDER BY v.version_number DESC LIMIT 1)::int`,
+      latestVersionId: sql<string>`(SELECT id FROM ${documentVersions} v WHERE v.team_id = ${documents.teamId} AND v.document_id = ${documents.id} ORDER BY v.version_number DESC LIMIT 1)`,
+      myAckVersionId: sql<string | null>`(SELECT version_id FROM ${documentAcknowledgments} a WHERE a.team_id = ${documents.teamId} AND a.document_id = ${documents.id} AND a.user_id = ${user.userId} LIMIT 1)`,
+    })
+    .from(documents)
+    .leftJoin(events, eq(events.id, documents.eventId))
+    .where(
+      and(
+        eq(documents.teamId, user.teamId),
+        eq(documents.mustAcknowledge, true),
+        isNull(documents.deletedAt),
+      ),
+    );
+  const stalePendingAcks = pendingAcks.filter(
+    (p) => p.latestVersionId && p.myAckVersionId !== p.latestVersionId,
+  );
 
   const seasonVariance = reconcile(
     seasonBudgets.map((r) => ({
@@ -147,6 +181,34 @@ export default async function EventsPage() {
               Create event
             </button>
           </form>
+        ) : null}
+
+        {stalePendingAcks.length > 0 ? (
+          <section className="mb-8">
+            <h2 className="mb-3 text-base font-semibold uppercase tracking-wide rc-muted">
+              Needs your acknowledgment
+            </h2>
+            <ul className="rc-list">
+              {stalePendingAcks.map((p) => (
+                <li key={p.id} className="rc-list-row">
+                  <div className="flex-1">
+                    <Link
+                      href={`/documents/${p.id}`}
+                      className="rc-link font-medium"
+                    >
+                      {p.name}
+                    </Link>
+                    <div className="rc-muted text-sm">
+                      {DOCUMENT_CATEGORY_LABEL[p.category]} · v
+                      {p.latestVersionNumber}
+                      {p.eventName ? ` · ${p.eventName}` : ""}
+                    </div>
+                  </div>
+                  <span className="rc-badge rc-badge-post_event">Pending</span>
+                </li>
+              ))}
+            </ul>
+          </section>
         ) : null}
 
         {seasonVariance.byCategory.length > 0 ? (

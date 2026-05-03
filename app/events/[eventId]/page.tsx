@@ -7,6 +7,9 @@ import {
   checklistInstanceItems,
   checklistInstances,
   checklistSignoffs,
+  documentAcknowledgments,
+  documentVersions,
+  documents,
   eventStages,
   events,
   expenseEntries,
@@ -22,8 +25,15 @@ import {
   vehicles,
   workOrders,
   type BudgetCategory,
+  type DocumentCategory,
   type OrderListStatus,
 } from "@/lib/db/schema";
+import {
+  ALL_DOCUMENT_CATEGORIES,
+  DOCUMENT_CATEGORY_LABEL,
+  uploadDocument,
+} from "@/lib/documents";
+import { isStorageConfigured } from "@/lib/storage";
 import {
   ALL_BUDGET_CATEGORIES,
   BUDGET_CATEGORY_LABEL,
@@ -209,6 +219,29 @@ export default async function EventDetailPage({
       ),
     )
     .orderBy(asc(mealPlanItems.whenAt), asc(mealPlanItems.createdAt));
+
+  // Documents for this event with their latest version + ack count
+  const docRows = await db
+    .select({
+      id: documents.id,
+      name: documents.name,
+      category: documents.category,
+      mustAcknowledge: documents.mustAcknowledge,
+      latestVersionId: sql<string | null>`(SELECT id FROM ${documentVersions} v WHERE v.team_id = ${documents.teamId} AND v.document_id = ${documents.id} ORDER BY v.version_number DESC LIMIT 1)`,
+      latestVersionNumber: sql<number | null>`(SELECT version_number FROM ${documentVersions} v WHERE v.team_id = ${documents.teamId} AND v.document_id = ${documents.id} ORDER BY v.version_number DESC LIMIT 1)::int`,
+      latestUploadedAt: sql<Date | null>`(SELECT created_at FROM ${documentVersions} v WHERE v.team_id = ${documents.teamId} AND v.document_id = ${documents.id} ORDER BY v.version_number DESC LIMIT 1)`,
+      myAckVersionId: sql<string | null>`(SELECT version_id FROM ${documentAcknowledgments} a WHERE a.team_id = ${documents.teamId} AND a.document_id = ${documents.id} AND a.user_id = ${me.userId} LIMIT 1)`,
+      ackCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${documentAcknowledgments} a WHERE a.team_id = ${documents.teamId} AND a.document_id = ${documents.id} AND a.version_id = (SELECT id FROM ${documentVersions} v WHERE v.team_id = ${documents.teamId} AND v.document_id = ${documents.id} ORDER BY v.version_number DESC LIMIT 1)), 0)`,
+    })
+    .from(documents)
+    .where(
+      and(
+        eq(documents.teamId, me.teamId),
+        eq(documents.eventId, eventId),
+        isNull(documents.deletedAt),
+      ),
+    )
+    .orderBy(asc(documents.category), asc(documents.name));
 
   // Budget lines + expenses for this event
   const budgetRows = await db
@@ -825,6 +858,37 @@ export default async function EventDetailPage({
     revalidatePath(`/events/${eventId}`);
   }
 
+  // ---- Document upload ----
+  async function uploadDocAction(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      throw new Error("Choose a file to upload");
+    }
+    const category = String(formData.get("category") ?? "") as DocumentCategory;
+    if (!ALL_DOCUMENT_CATEGORIES.includes(category)) {
+      throw new Error("invalid category");
+    }
+    const name = String(formData.get("name") ?? "").trim();
+    if (!name) throw new Error("name required");
+    const mustAck = String(formData.get("must_acknowledge") ?? "") === "on";
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await uploadDocument({
+      teamId: u.teamId,
+      userId: u.userId,
+      eventId,
+      category,
+      name,
+      mustAcknowledge: u.role === "chief" ? mustAck : false,
+      filename: file.name,
+      contentType: file.type || "application/octet-stream",
+      bytes,
+    });
+    revalidatePath(`/events/${eventId}`);
+  }
+
   async function rebuildChecklists() {
     "use server";
     const u = await requireChief();
@@ -1091,6 +1155,98 @@ export default async function EventDetailPage({
               </ul>
             );
           })()}
+        </section>
+
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">Documents</h2>
+          {!isStorageConfigured() ? (
+            <div className="rc-card mb-4 border-amber-500/30 bg-amber-500/10 text-sm text-amber-700 dark:text-amber-300">
+              File storage isn&apos;t configured yet (R2_* env vars missing).
+              Documents you upload will fail until the chief sets the secrets.
+            </div>
+          ) : null}
+          <form
+            action={uploadDocAction}
+            className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12"
+            encType="multipart/form-data"
+          >
+            <input
+              name="file"
+              type="file"
+              required
+              accept="application/pdf,text/plain,image/*,.gpx,.xml"
+              className="rc-input sm:col-span-4"
+            />
+            <input
+              name="name"
+              required
+              placeholder="Logical name (e.g., Bulletin 1)"
+              className="rc-input sm:col-span-3"
+            />
+            <select
+              name="category"
+              required
+              defaultValue=""
+              className="rc-select sm:col-span-2"
+            >
+              <option value="" disabled>
+                Category…
+              </option>
+              {ALL_DOCUMENT_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {DOCUMENT_CATEGORY_LABEL[c]}
+                </option>
+              ))}
+            </select>
+            {me.role === "chief" ? (
+              <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                <input type="checkbox" name="must_acknowledge" />
+                Must ack
+              </label>
+            ) : (
+              <span className="rc-muted text-xs sm:col-span-2">
+                {/* placeholder so grid stays balanced */}
+              </span>
+            )}
+            <button type="submit" className="rc-btn rc-btn-primary sm:col-span-1">
+              Upload
+            </button>
+          </form>
+          {docRows.length === 0 ? (
+            <p className="rc-muted text-sm">No documents uploaded yet.</p>
+          ) : (
+            <ul className="rc-list">
+              {docRows.map((d) => {
+                const myAckIsCurrent =
+                  d.myAckVersionId && d.myAckVersionId === d.latestVersionId;
+                const needsAck = d.mustAcknowledge && !myAckIsCurrent;
+                return (
+                  <li key={d.id} className="rc-list-row">
+                    <div className="flex-1">
+                      <Link
+                        href={`/documents/${d.id}`}
+                        className="rc-link font-medium"
+                      >
+                        {d.name}
+                      </Link>
+                      <div className="rc-muted text-sm">
+                        {DOCUMENT_CATEGORY_LABEL[d.category]} · v
+                        {d.latestVersionNumber ?? "?"} · uploaded{" "}
+                        {d.latestUploadedAt
+                          ? d.latestUploadedAt.toISOString().slice(0, 10)
+                          : "—"}
+                      </div>
+                    </div>
+                    {needsAck ? (
+                      <span className="rc-badge rc-badge-post_event">Needs ack</span>
+                    ) : d.mustAcknowledge ? (
+                      <span className="rc-badge rc-badge-on_event">Acked</span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
 
         <section className="mb-10">
