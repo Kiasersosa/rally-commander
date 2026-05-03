@@ -8,11 +8,15 @@ import {
   workOrders,
   users,
   events,
+  checklistTemplates,
+  checklistTemplateItems,
   type VehicleType,
 } from "@/lib/db/schema";
 import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { statusLabel } from "@/lib/work-order-lifecycle";
+import { ALL_KINDS, KIND_LABEL } from "@/lib/checklists";
+import { sql } from "drizzle-orm";
 
 type Params = Promise<{ vehicleId: string }>;
 
@@ -78,6 +82,22 @@ export default async function VehicleDetailPage({
       ),
     )
     .orderBy(desc(workOrders.createdAt));
+
+  // Per-kind template item counts for this vehicle
+  const templateCounts = await db
+    .select({
+      kind: checklistTemplates.kind,
+      itemCount: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${checklistTemplateItems} ti WHERE ti.team_id = ${checklistTemplates.teamId} AND ti.template_id = ${checklistTemplates.id}), 0)`,
+    })
+    .from(checklistTemplates)
+    .where(
+      and(
+        eq(checklistTemplates.teamId, me.teamId),
+        eq(checklistTemplates.vehicleId, vehicleId),
+        isNull(checklistTemplates.deletedAt),
+      ),
+    );
+  const itemsByKind = new Map(templateCounts.map((t) => [t.kind, t.itemCount]));
 
   const log = await db
     .select({
@@ -308,6 +328,37 @@ export default async function VehicleDetailPage({
             </form>
           </section>
         ) : null}
+
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">
+            Checklist templates
+          </h2>
+          <ul className="rc-list">
+            {ALL_KINDS.map((k) => {
+              const count = itemsByKind.get(k) ?? 0;
+              return (
+                <li key={k} className="rc-list-row">
+                  <div>
+                    <Link
+                      href={`/vehicles/${vehicleId}/templates/${k}`}
+                      className="rc-link font-medium"
+                    >
+                      {KIND_LABEL[k]}
+                    </Link>
+                    <div className="rc-muted text-sm">
+                      {count === 0
+                        ? "No items yet"
+                        : `${count} item${count === 1 ? "" : "s"}`}
+                    </div>
+                  </div>
+                  <span className="rc-muted text-xs">
+                    {me.role === "chief" ? "Edit →" : "View →"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
 
         <section>
           <h2 className="mb-4 text-lg font-semibold tracking-tight">

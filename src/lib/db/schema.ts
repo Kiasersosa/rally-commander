@@ -43,6 +43,11 @@ export const workOrderStatusEnum = pgEnum("work_order_status", [
   "done",
 ]);
 
+export const checklistKindEnum = pgEnum("checklist_kind", [
+  "pre_event_inspection",
+  "post_event_teardown",
+]);
+
 // ---------- domain ----------
 
 export const teams = pgTable("teams", {
@@ -216,6 +221,142 @@ export const workOrderNotes = pgTable(
   }),
 );
 
+// ---------- Phase 3: checklists ----------
+//
+// Templates are reusable per (vehicle, kind). Items are ordered.
+// On event creation (or manual rebuild), each template materializes into a
+// snapshot ChecklistInstance with a copy of its items. Sign-offs reference
+// instance_items so historical state is preserved even if the template later
+// changes or the vehicle is removed.
+
+export const checklistTemplates = pgTable(
+  "checklist_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    vehicleId: uuid("vehicle_id")
+      .notNull()
+      .references(() => vehicles.id, { onDelete: "cascade" }),
+    kind: checklistKindEnum("kind").notNull(),
+    name: text("name").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamIdx: index("checklist_templates_team_idx").on(t.teamId),
+    vehicleKindUniq: uniqueIndex("checklist_templates_vehicle_kind_uniq").on(
+      t.teamId,
+      t.vehicleId,
+      t.kind,
+    ),
+  }),
+);
+
+export const checklistTemplateItems = pgTable(
+  "checklist_template_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    templateId: uuid("template_id")
+      .notNull()
+      .references(() => checklistTemplates.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    label: text("label").notNull(),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    templateIdx: index("checklist_template_items_template_idx").on(
+      t.teamId,
+      t.templateId,
+      t.orderIndex,
+    ),
+  }),
+);
+
+export const checklistInstances = pgTable(
+  "checklist_instances",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    vehicleId: uuid("vehicle_id")
+      .notNull()
+      .references(() => vehicles.id, { onDelete: "cascade" }),
+    kind: checklistKindEnum("kind").notNull(),
+    name: text("name").notNull(),
+    sourceTemplateId: uuid("source_template_id").references(
+      () => checklistTemplates.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventVehicleKindUniq: uniqueIndex("checklist_instances_event_vehicle_kind_uniq").on(
+      t.teamId,
+      t.eventId,
+      t.vehicleId,
+      t.kind,
+    ),
+  }),
+);
+
+export const checklistInstanceItems = pgTable(
+  "checklist_instance_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    instanceId: uuid("instance_id")
+      .notNull()
+      .references(() => checklistInstances.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    label: text("label").notNull(),
+    description: text("description"),
+  },
+  (t) => ({
+    instanceIdx: index("checklist_instance_items_instance_idx").on(
+      t.teamId,
+      t.instanceId,
+      t.orderIndex,
+    ),
+  }),
+);
+
+export const checklistSignoffs = pgTable(
+  "checklist_signoffs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    instanceItemId: uuid("instance_item_id")
+      .notNull()
+      .references(() => checklistInstanceItems.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    signedAt: timestamp("signed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // One signoff per item — re-signing replaces (server-side upsert handles).
+    itemUniq: uniqueIndex("checklist_signoffs_item_uniq").on(
+      t.teamId,
+      t.instanceItemId,
+    ),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -283,6 +424,18 @@ export type UserRole = (typeof userRoleEnum.enumValues)[number];
 export type EventPhase = (typeof eventPhaseEnum.enumValues)[number];
 export type VehicleType = (typeof vehicleTypeEnum.enumValues)[number];
 export type WorkOrderStatus = (typeof workOrderStatusEnum.enumValues)[number];
+
+export type ChecklistTemplate = typeof checklistTemplates.$inferSelect;
+export type NewChecklistTemplate = typeof checklistTemplates.$inferInsert;
+export type ChecklistTemplateItem = typeof checklistTemplateItems.$inferSelect;
+export type NewChecklistTemplateItem = typeof checklistTemplateItems.$inferInsert;
+export type ChecklistInstance = typeof checklistInstances.$inferSelect;
+export type NewChecklistInstance = typeof checklistInstances.$inferInsert;
+export type ChecklistInstanceItem = typeof checklistInstanceItems.$inferSelect;
+export type NewChecklistInstanceItem = typeof checklistInstanceItems.$inferInsert;
+export type ChecklistSignoff = typeof checklistSignoffs.$inferSelect;
+export type NewChecklistSignoff = typeof checklistSignoffs.$inferInsert;
+export type ChecklistKind = (typeof checklistKindEnum.enumValues)[number];
 
 // boolean export to silence unused import warnings if added later
 void boolean;

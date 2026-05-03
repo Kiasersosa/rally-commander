@@ -2,10 +2,21 @@ import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { events, todos, users } from "@/lib/db/schema";
+import {
+  checklistInstanceItems,
+  checklistInstances,
+  checklistSignoffs,
+  events,
+  todos,
+  users,
+  vehicles,
+} from "@/lib/db/schema";
 import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
 import { advance } from "@/lib/event-lifecycle";
 import { Nav } from "@/components/Nav";
+import { instantiateChecklistsForEvent, KIND_LABEL } from "@/lib/checklists";
+import { sql } from "drizzle-orm";
+import Link from "next/link";
 
 type Params = Promise<{ eventId: string }>;
 
@@ -42,6 +53,27 @@ export default async function EventDetailPage({ params }: { params: Params }) {
     .from(users)
     .where(and(eq(users.teamId, me.teamId), isNull(users.deletedAt)))
     .orderBy(asc(users.name));
+
+  // Per-vehicle checklist instances with completion stats
+  const checklistRows = await db
+    .select({
+      id: checklistInstances.id,
+      kind: checklistInstances.kind,
+      name: checklistInstances.name,
+      vehicleId: checklistInstances.vehicleId,
+      vehicleName: vehicles.name,
+      total: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${checklistInstanceItems} ii WHERE ii.team_id = ${checklistInstances.teamId} AND ii.instance_id = ${checklistInstances.id}), 0)`,
+      signed: sql<number>`COALESCE((SELECT COUNT(*)::int FROM ${checklistSignoffs} s INNER JOIN ${checklistInstanceItems} ii ON ii.id = s.instance_item_id WHERE s.team_id = ${checklistInstances.teamId} AND ii.instance_id = ${checklistInstances.id}), 0)`,
+    })
+    .from(checklistInstances)
+    .innerJoin(vehicles, eq(vehicles.id, checklistInstances.vehicleId))
+    .where(
+      and(
+        eq(checklistInstances.teamId, me.teamId),
+        eq(checklistInstances.eventId, eventId),
+      ),
+    )
+    .orderBy(asc(vehicles.name), asc(checklistInstances.kind));
 
   const todoRows = await db
     .select({
@@ -116,6 +148,13 @@ export default async function EventDetailPage({ params }: { params: Params }) {
     revalidatePath(`/events/${eventId}`);
   }
 
+  async function rebuildChecklists() {
+    "use server";
+    const u = await requireChief();
+    await instantiateChecklistsForEvent(u.teamId, eventId);
+    revalidatePath(`/events/${eventId}`);
+  }
+
   async function completeTodo(formData: FormData) {
     "use server";
     const u = await requireSession();
@@ -171,6 +210,59 @@ export default async function EventDetailPage({ params }: { params: Params }) {
 
         <section className="rc-empty-section mb-10">
           {PHASE_HINT[event.phase]}
+        </section>
+
+        <section className="mb-10">
+          <div className="mb-4 flex items-baseline justify-between">
+            <h2 className="text-lg font-semibold tracking-tight">Checklists</h2>
+            {me.role === "chief" ? (
+              <form action={rebuildChecklists}>
+                <button type="submit" className="rc-btn rc-btn-ghost text-xs">
+                  Rebuild from templates
+                </button>
+              </form>
+            ) : null}
+          </div>
+          {checklistRows.length === 0 ? (
+            <p className="rc-muted text-sm">
+              No checklists. Add items to a vehicle template, then rebuild.
+            </p>
+          ) : (
+            <ul className="rc-list">
+              {checklistRows.map((c) => {
+                const total = Number(c.total);
+                const signed = Number(c.signed);
+                const pct =
+                  total === 0 ? 100 : Math.round((signed / total) * 100);
+                return (
+                  <li key={c.id} className="rc-list-row">
+                    <div className="flex-1">
+                      <Link
+                        href={`/checklists/${c.id}`}
+                        className="rc-link font-medium"
+                      >
+                        {c.vehicleName} · {KIND_LABEL[c.kind]}
+                      </Link>
+                      <div className="rc-muted text-sm">
+                        {signed} of {total} signed off
+                      </div>
+                      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[color:var(--border)]">
+                        <div
+                          className="h-full rounded-full bg-[color:var(--accent)]"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                    <span
+                      className={`rc-badge rc-badge-${pct === 100 ? "on_event" : pct === 0 ? "post_event" : "prep"}`}
+                    >
+                      {pct}%
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
 
         <section className="mb-10">

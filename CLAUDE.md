@@ -71,6 +71,7 @@ The Docker `entrypoint.sh` runs `drizzle-kit migrate` then `tsx src/lib/db/boots
 - **Phase 1 (Foundation):** shipped + deployed. Auth, team/user/event/todo, lifecycle, debrief.
 - **Phase 2 (Vehicles & work orders):** shipped. Vehicle registry (rally_car / service_truck / trailer), work orders with `open → in_progress → done` lifecycle, append-only notes thread, driver-condition reports auto-create draft work orders, maintenance log = closed work orders.
   - **Photo attachments deferred to Phase 5 (documents).** Phase 2 acceptance mentioned photos but the architecture decision is to land all file storage with the documents module so we don't need a Fly volume yet.
+- **Phase 3 (Checklists):** shipped. Per-vehicle reusable templates for `pre_event_inspection` and `post_event_teardown`, auto-instantiate as snapshots on event create (or on chief-triggered rebuild). Sign-offs are timestamped + attributed and blocked by unique index from duplication. `ChecklistEngine` (src/lib/checklist-engine.ts) is a pure deep module with full Vitest coverage. Print view at /checklists/[id]/print.
 - See `plans/v1-build.md` for the rest. Issue tracking on GitHub.
 
 ## Style system

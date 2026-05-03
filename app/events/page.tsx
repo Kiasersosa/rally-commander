@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { events } from "@/lib/db/schema";
 import { getCurrentUser, requireChief } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
+import { instantiateChecklistsForEvent } from "@/lib/checklists";
 
 export default async function EventsPage() {
   const user = await getCurrentUser();
@@ -29,13 +30,18 @@ export default async function EventsPage() {
     if (!name || !eventDate || !location) {
       throw new Error("name, date, and location are required");
     }
-    await db.insert(events).values({
-      teamId: u.teamId,
-      name,
-      eventDate,
-      location,
-      araRoundNumber: Number.isFinite(araRoundNumber) ? araRoundNumber : null,
-    });
+    const [created] = await db
+      .insert(events)
+      .values({
+        teamId: u.teamId,
+        name,
+        eventDate,
+        location,
+        araRoundNumber: Number.isFinite(araRoundNumber) ? araRoundNumber : null,
+      })
+      .returning({ id: events.id });
+    // Auto-instantiate checklist templates for every active vehicle.
+    await instantiateChecklistsForEvent(u.teamId, created.id);
     revalidatePath("/events");
   }
 
