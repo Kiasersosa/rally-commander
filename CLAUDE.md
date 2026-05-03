@@ -68,8 +68,14 @@ The Docker `entrypoint.sh` runs `drizzle-kit migrate` then `tsx src/lib/db/boots
 
 ## Phase status
 
-- **Phase 1 (Foundation):** in progress / shipping. Auth, team/user/event/todo, lifecycle, debrief.
+- **Phase 1 (Foundation):** shipped + deployed. Auth, team/user/event/todo, lifecycle, debrief.
+- **Phase 2 (Vehicles & work orders):** shipped. Vehicle registry (rally_car / service_truck / trailer), work orders with `open → in_progress → done` lifecycle, append-only notes thread, driver-condition reports auto-create draft work orders, maintenance log = closed work orders.
+  - **Photo attachments deferred to Phase 5 (documents).** Phase 2 acceptance mentioned photos but the architecture decision is to land all file storage with the documents module so we don't need a Fly volume yet.
 - See `plans/v1-build.md` for the rest. Issue tracking on GitHub.
+
+## Style system
+
+`app/globals.css` defines a small set of `rc-*` utility classes (rc-card, rc-input, rc-select, rc-btn, rc-btn-primary, rc-btn-ghost, rc-btn-danger, rc-link, rc-muted, rc-list, rc-list-row, rc-empty-section, rc-badge, rc-badge-{phase}, rc-nav, rc-logo). Use these instead of one-off Tailwind utilities for consistency. Phase badges (`rc-badge-planning`, `rc-badge-prep`, `rc-badge-on_event`, `rc-badge-post_event`) are color-coded and double up as work-order status indicators (open/in_progress/done map to planning/prep/post_event respectively).
 
 ## What NOT to do
 

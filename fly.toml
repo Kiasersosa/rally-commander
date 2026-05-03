@@ -1,35 +1,26 @@
-# Rally Commander — Fly.io deploy config
-# App: rally-commander
-# Postgres: separate cluster, attached via `fly postgres attach`
+# fly.toml app configuration file generated for rally-commander on 2026-05-02T21:12:29-04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "rally-commander"
-primary_region = "ewr"
+app = 'rally-commander'
+primary_region = 'ewr'
 
 [build]
 
 [env]
-  NEXT_TELEMETRY_DISABLED = "1"
-  PORT = "3000"
+  NEXT_TELEMETRY_DISABLED = '1'
+  PORT = '3000'
 
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["app"]
+  processes = ['app']
 
 [[vm]]
-  cpu_kind = "shared"
+  cpu_kind = 'shared'
   cpus = 1
   memory_mb = 512
-
-# Secrets to set before first deploy:
-#   fly secrets set AUTH_SECRET=$(openssl rand -base64 32) \
-#                   AUTH_URL=https://rally-commander.fly.dev \
-#                   RESEND_API_KEY=re_xxx \
-#                   EMAIL_FROM='Rally Commander <noreply@rallycommander.app>' \
-#                   RC_BOOTSTRAP_TEAM_NAME='My Rally Team' \
-#                   RC_BOOTSTRAP_CHIEF_EMAIL=chief@example.com \
-#                   RC_BOOTSTRAP_CHIEF_NAME='Crew Chief'
-# DATABASE_URL is set automatically by `fly postgres attach`.

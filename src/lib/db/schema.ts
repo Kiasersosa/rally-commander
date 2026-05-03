@@ -31,6 +31,18 @@ export const eventPhaseEnum = pgEnum("event_phase", [
   "post_event",
 ]);
 
+export const vehicleTypeEnum = pgEnum("vehicle_type", [
+  "rally_car",
+  "service_truck",
+  "trailer",
+]);
+
+export const workOrderStatusEnum = pgEnum("work_order_status", [
+  "open",
+  "in_progress",
+  "done",
+]);
+
 // ---------- domain ----------
 
 export const teams = pgTable("teams", {
@@ -117,6 +129,93 @@ export const todos = pgTable(
   }),
 );
 
+// ---------- Phase 2: vehicles & work orders ----------
+
+export const vehicles = pgTable(
+  "vehicles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    type: vehicleTypeEnum("type").notNull(),
+    name: text("name").notNull(),
+    year: integer("year"),
+    make: text("make"),
+    model: text("model"),
+    vin: text("vin"),
+    plate: text("plate"),
+    notes: text("notes"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamIdx: index("vehicles_team_idx").on(t.teamId),
+  }),
+);
+
+export const workOrders = pgTable(
+  "work_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    vehicleId: uuid("vehicle_id")
+      .notNull()
+      .references(() => vehicles.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    status: workOrderStatusEnum("status").notNull().default("open"),
+    assigneeUserId: uuid("assignee_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    openedByUserId: uuid("opened_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    // Driver-report metadata: when a driver enters a condition note after a
+    // stage, a draft work order is auto-created with these set.
+    driverReportStageNumber: integer("driver_report_stage_number"),
+    eventId: uuid("event_id").references(() => events.id, { onDelete: "set null" }),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    closedByUserId: uuid("closed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamIdx: index("work_orders_team_idx").on(t.teamId),
+    vehicleIdx: index("work_orders_vehicle_idx").on(t.teamId, t.vehicleId),
+    statusIdx: index("work_orders_status_idx").on(t.teamId, t.status),
+  }),
+);
+
+// Append-only thread of notes + status transitions on a work order.
+// Status transitions are recorded with `statusTo` set; pure notes leave it null.
+export const workOrderNotes = pgTable(
+  "work_order_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    workOrderId: uuid("work_order_id")
+      .notNull()
+      .references(() => workOrders.id, { onDelete: "cascade" }),
+    authorUserId: uuid("author_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    body: text("body").notNull(),
+    statusTo: workOrderStatusEnum("status_to"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamWoIdx: index("work_order_notes_team_wo_idx").on(t.teamId, t.workOrderId),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -173,8 +272,17 @@ export type NewEvent = typeof events.$inferInsert;
 export type Todo = typeof todos.$inferSelect;
 export type NewTodo = typeof todos.$inferInsert;
 
+export type Vehicle = typeof vehicles.$inferSelect;
+export type NewVehicle = typeof vehicles.$inferInsert;
+export type WorkOrder = typeof workOrders.$inferSelect;
+export type NewWorkOrder = typeof workOrders.$inferInsert;
+export type WorkOrderNote = typeof workOrderNotes.$inferSelect;
+export type NewWorkOrderNote = typeof workOrderNotes.$inferInsert;
+
 export type UserRole = (typeof userRoleEnum.enumValues)[number];
 export type EventPhase = (typeof eventPhaseEnum.enumValues)[number];
+export type VehicleType = (typeof vehicleTypeEnum.enumValues)[number];
+export type WorkOrderStatus = (typeof workOrderStatusEnum.enumValues)[number];
 
 // boolean export to silence unused import warnings if added later
 void boolean;

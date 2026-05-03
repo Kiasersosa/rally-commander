@@ -13,6 +13,9 @@ export function Nav({ user }: { user: SessionUser }) {
           <Link href="/events" className="rc-link text-sm">
             Events
           </Link>
+          <Link href="/vehicles" className="rc-link text-sm">
+            Vehicles
+          </Link>
           <Link href="/team" className="rc-link text-sm">
             Team
           </Link>
