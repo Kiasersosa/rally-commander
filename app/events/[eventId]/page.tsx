@@ -950,6 +950,14 @@ export default async function EventDetailPage({
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {event.phase === "on_event" ? (
+              <Link
+                href={`/events/${eventId}/live`}
+                className="rc-btn rc-btn-primary text-sm"
+              >
+                Live mode →
+              </Link>
+            ) : null}
             <Link
               href={`/events/${eventId}/tech-ready`}
               className="rc-link text-sm"

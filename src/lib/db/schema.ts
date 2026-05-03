@@ -100,6 +100,15 @@ export const equipmentCategoryEnum = pgEnum("equipment_category", [
   "other",
 ]);
 
+export const crewStatusEnum = pgEnum("crew_status", [
+  "at_service",
+  "paddock",
+  "parts_run",
+  "hotel",
+  "recce",
+  "other",
+]);
+
 // ---------- domain ----------
 
 export const teams = pgTable("teams", {
@@ -859,6 +868,110 @@ export const equipmentItems = pgTable(
   }),
 );
 
+// ---------- Phase 9: live mode ----------
+
+export const incidents = pgTable(
+  "incidents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    vehicleId: uuid("vehicle_id")
+      .notNull()
+      .references(() => vehicles.id, { onDelete: "restrict" }),
+    stageNumber: integer("stage_number"),
+    note: text("note").notNull(),
+    photoDocumentId: uuid("photo_document_id").references(() => documents.id, {
+      onDelete: "set null",
+    }),
+    reportedByUserId: uuid("reported_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    workOrderId: uuid("work_order_id").references(() => workOrders.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventIdx: index("incidents_event_idx").on(t.teamId, t.eventId),
+  }),
+);
+
+export const serviceStops = pgTable(
+  "service_stops",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    plannedDurationSeconds: integer("planned_duration_seconds")
+      .notNull()
+      .default(1800),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    startedByUserId: uuid("started_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    notes: text("notes"),
+  },
+  (t) => ({
+    eventIdx: index("service_stops_event_idx").on(t.teamId, t.eventId),
+  }),
+);
+
+export const serviceStopItems = pgTable(
+  "service_stop_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    serviceStopId: uuid("service_stop_id")
+      .notNull()
+      .references(() => serviceStops.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    label: text("label").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    completedByUserId: uuid("completed_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    stopIdx: index("service_stop_items_stop_idx").on(t.teamId, t.serviceStopId, t.orderIndex),
+  }),
+);
+
+// One row per (event, user). Latest status with notes + last-updated time.
+export const crewStatusEntries = pgTable(
+  "crew_status_entries",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    status: crewStatusEnum("status").notNull(),
+    notes: text("notes"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.eventId, t.userId] }),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -980,6 +1093,16 @@ export type NewEquipmentItem = typeof equipmentItems.$inferInsert;
 export type SafetyItemType = (typeof safetyItemTypeEnum.enumValues)[number];
 export type LicenseKind = (typeof licenseKindEnum.enumValues)[number];
 export type EquipmentCategory = (typeof equipmentCategoryEnum.enumValues)[number];
+
+export type Incident = typeof incidents.$inferSelect;
+export type NewIncident = typeof incidents.$inferInsert;
+export type ServiceStop = typeof serviceStops.$inferSelect;
+export type NewServiceStop = typeof serviceStops.$inferInsert;
+export type ServiceStopItem = typeof serviceStopItems.$inferSelect;
+export type NewServiceStopItem = typeof serviceStopItems.$inferInsert;
+export type CrewStatusEntry = typeof crewStatusEntries.$inferSelect;
+export type NewCrewStatusEntry = typeof crewStatusEntries.$inferInsert;
+export type CrewStatus = (typeof crewStatusEnum.enumValues)[number];
 
 // boolean export to silence unused import warnings if added later
 void boolean;
