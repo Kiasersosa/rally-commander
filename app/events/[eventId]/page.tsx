@@ -50,6 +50,15 @@ import Link from "next/link";
 type Params = Promise<{ eventId: string }>;
 type SearchParams = Promise<{ legs?: string }>;
 
+// Module-level helper. Server actions defined inside the page component
+// cannot close over functions from the parent scope (Next.js can't
+// serialize the closure), so this lives up here.
+function dollarsToCents(s: string): number {
+  const n = Number.parseFloat(s);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100);
+}
+
 const PHASE_HINT: Record<string, string> = {
   planning:
     "Planning phase — events, hotels, and initial logistics modules will appear here in later phases.",
@@ -766,12 +775,6 @@ export default async function EventDetailPage({
   }
 
   // ---- Budget actions ----
-
-  function dollarsToCents(s: string): number {
-    const n = Number.parseFloat(s);
-    if (!Number.isFinite(n)) return 0;
-    return Math.round(n * 100);
-  }
 
   async function upsertBudgetLine(formData: FormData) {
     "use server";
