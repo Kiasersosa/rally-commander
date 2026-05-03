@@ -415,6 +415,103 @@ export const tireNeeds = pgTable(
   }),
 );
 
+// ---------- Phase 5a: logistics (itinerary, hotels, meals) ----------
+
+export const itineraryLegs = pgTable(
+  "itinerary_legs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    fromLocation: text("from_location").notNull(),
+    toLocation: text("to_location").notNull(),
+    vehicleId: uuid("vehicle_id").references(() => vehicles.id, {
+      onDelete: "set null",
+    }),
+    departAt: timestamp("depart_at", { withTimezone: true }),
+    arriveAt: timestamp("arrive_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventIdx: index("itinerary_legs_event_idx").on(t.teamId, t.eventId, t.orderIndex),
+  }),
+);
+
+export const itineraryLegAssignees = pgTable(
+  "itinerary_leg_assignees",
+  {
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    legId: uuid("leg_id")
+      .notNull()
+      .references(() => itineraryLegs.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.legId, t.userId] }),
+    userIdx: index("itinerary_leg_assignees_user_idx").on(t.teamId, t.userId),
+  }),
+);
+
+export const hotelBookings = pgTable(
+  "hotel_bookings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    address: text("address"),
+    confirmationNumber: text("confirmation_number"),
+    checkInDate: date("check_in_date"),
+    checkOutDate: date("check_out_date"),
+    roomAssignments: text("room_assignments"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventIdx: index("hotel_bookings_event_idx").on(t.teamId, t.eventId),
+  }),
+);
+
+export const mealPlanItems = pgTable(
+  "meal_plan_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    whenAt: timestamp("when_at", { withTimezone: true }),
+    whereAt: text("where_at"),
+    what: text("what").notNull(),
+    assigneeUserId: uuid("assignee_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventIdx: index("meal_plan_items_event_idx").on(t.teamId, t.eventId),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -500,6 +597,13 @@ export type NewOrderListItem = typeof orderListItems.$inferInsert;
 export type OrderListStatus = (typeof orderListStatusEnum.enumValues)[number];
 export type TireNeed = typeof tireNeeds.$inferSelect;
 export type NewTireNeed = typeof tireNeeds.$inferInsert;
+
+export type ItineraryLeg = typeof itineraryLegs.$inferSelect;
+export type NewItineraryLeg = typeof itineraryLegs.$inferInsert;
+export type HotelBooking = typeof hotelBookings.$inferSelect;
+export type NewHotelBooking = typeof hotelBookings.$inferInsert;
+export type MealPlanItem = typeof mealPlanItems.$inferSelect;
+export type NewMealPlanItem = typeof mealPlanItems.$inferInsert;
 
 // boolean export to silence unused import warnings if added later
 void boolean;

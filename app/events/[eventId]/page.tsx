@@ -7,6 +7,10 @@ import {
   checklistInstances,
   checklistSignoffs,
   events,
+  hotelBookings,
+  itineraryLegAssignees,
+  itineraryLegs,
+  mealPlanItems,
   orderListItems,
   tireNeeds,
   todos,
@@ -23,6 +27,7 @@ import { sql } from "drizzle-orm";
 import Link from "next/link";
 
 type Params = Promise<{ eventId: string }>;
+type SearchParams = Promise<{ legs?: string }>;
 
 const PHASE_HINT: Record<string, string> = {
   planning:
@@ -34,10 +39,18 @@ const PHASE_HINT: Record<string, string> = {
     "Post-event phase — receipts reconciliation and post-event teardown checklists will appear here.",
 };
 
-export default async function EventDetailPage({ params }: { params: Params }) {
+export default async function EventDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Params;
+  searchParams: SearchParams;
+}) {
   const me = await getCurrentUser();
   if (!me) redirect("/login");
   const { eventId } = await params;
+  const { legs: legsFilter } = await searchParams;
+  const showOnlyMyLegs = legsFilter === "mine";
 
   const [event] = await db
     .select()
@@ -106,6 +119,85 @@ export default async function EventDetailPage({ params }: { params: Params }) {
       and(eq(tireNeeds.teamId, me.teamId), eq(tireNeeds.eventId, eventId)),
     )
     .orderBy(asc(tireNeeds.createdAt));
+
+  // Active team vehicles (for itinerary leg dropdown)
+  const teamVehicles = await db
+    .select({ id: vehicles.id, name: vehicles.name })
+    .from(vehicles)
+    .where(and(eq(vehicles.teamId, me.teamId), isNull(vehicles.deletedAt)))
+    .orderBy(asc(vehicles.name));
+
+  // Itinerary legs + assignees (joined as aggregated names per leg)
+  const legs = await db
+    .select({
+      id: itineraryLegs.id,
+      orderIndex: itineraryLegs.orderIndex,
+      fromLocation: itineraryLegs.fromLocation,
+      toLocation: itineraryLegs.toLocation,
+      vehicleId: itineraryLegs.vehicleId,
+      vehicleName: vehicles.name,
+      departAt: itineraryLegs.departAt,
+      arriveAt: itineraryLegs.arriveAt,
+      notes: itineraryLegs.notes,
+    })
+    .from(itineraryLegs)
+    .leftJoin(vehicles, eq(vehicles.id, itineraryLegs.vehicleId))
+    .where(
+      and(
+        eq(itineraryLegs.teamId, me.teamId),
+        eq(itineraryLegs.eventId, eventId),
+      ),
+    )
+    .orderBy(asc(itineraryLegs.orderIndex));
+
+  const legAssignees = await db
+    .select({
+      legId: itineraryLegAssignees.legId,
+      userId: itineraryLegAssignees.userId,
+      userName: users.name,
+    })
+    .from(itineraryLegAssignees)
+    .innerJoin(users, eq(users.id, itineraryLegAssignees.userId))
+    .where(eq(itineraryLegAssignees.teamId, me.teamId));
+
+  const assigneesByLeg = new Map<string, { userId: string; userName: string }[]>();
+  for (const a of legAssignees) {
+    const list = assigneesByLeg.get(a.legId) ?? [];
+    list.push({ userId: a.userId, userName: a.userName });
+    assigneesByLeg.set(a.legId, list);
+  }
+
+  // Hotel bookings
+  const hotels = await db
+    .select()
+    .from(hotelBookings)
+    .where(
+      and(
+        eq(hotelBookings.teamId, me.teamId),
+        eq(hotelBookings.eventId, eventId),
+      ),
+    )
+    .orderBy(asc(hotelBookings.checkInDate), asc(hotelBookings.createdAt));
+
+  // Meal plan items
+  const meals = await db
+    .select({
+      id: mealPlanItems.id,
+      whenAt: mealPlanItems.whenAt,
+      whereAt: mealPlanItems.whereAt,
+      what: mealPlanItems.what,
+      assigneeUserId: mealPlanItems.assigneeUserId,
+      assigneeName: users.name,
+    })
+    .from(mealPlanItems)
+    .leftJoin(users, eq(users.id, mealPlanItems.assigneeUserId))
+    .where(
+      and(
+        eq(mealPlanItems.teamId, me.teamId),
+        eq(mealPlanItems.eventId, eventId),
+      ),
+    )
+    .orderBy(asc(mealPlanItems.whenAt), asc(mealPlanItems.createdAt));
 
   // Per-vehicle checklist instances with completion stats
   const checklistRows = await db
@@ -295,6 +387,169 @@ export default async function EventDetailPage({ params }: { params: Params }) {
     revalidatePath(`/events/${eventId}`);
   }
 
+  // ---- Itinerary actions ----
+  async function addLeg(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const fromLocation = String(formData.get("from_location") ?? "").trim();
+    const toLocation = String(formData.get("to_location") ?? "").trim();
+    if (!fromLocation || !toLocation) throw new Error("from and to required");
+    const vehicleRaw = String(formData.get("vehicle_id") ?? "");
+    const vehicleId = vehicleRaw || null;
+    const departRaw = String(formData.get("depart_at") ?? "");
+    const arriveRaw = String(formData.get("arrive_at") ?? "");
+    const notes = String(formData.get("notes") ?? "").trim() || null;
+    const departAt = departRaw ? new Date(departRaw) : null;
+    const arriveAt = arriveRaw ? new Date(arriveRaw) : null;
+
+    const last = await db
+      .select({ orderIndex: itineraryLegs.orderIndex })
+      .from(itineraryLegs)
+      .where(
+        and(
+          eq(itineraryLegs.teamId, u.teamId),
+          eq(itineraryLegs.eventId, eventId),
+        ),
+      )
+      .orderBy(asc(itineraryLegs.orderIndex));
+    const next = last.length ? last[last.length - 1].orderIndex + 1 : 0;
+    const [leg] = await db
+      .insert(itineraryLegs)
+      .values({
+        teamId: u.teamId,
+        eventId,
+        orderIndex: next,
+        fromLocation,
+        toLocation,
+        vehicleId,
+        departAt,
+        arriveAt,
+        notes,
+      })
+      .returning();
+    const assigneeIds = formData.getAll("assignee_user_id").map(String).filter(Boolean);
+    if (assigneeIds.length > 0) {
+      await db.insert(itineraryLegAssignees).values(
+        assigneeIds.map((userId) => ({ teamId: u.teamId, legId: leg.id, userId })),
+      );
+    }
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteLeg(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    await db
+      .delete(itineraryLegs)
+      .where(and(eq(itineraryLegs.id, id), eq(itineraryLegs.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function moveLeg(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = String(formData.get("id") ?? "");
+    const dir = String(formData.get("dir") ?? "");
+    if (!id || (dir !== "up" && dir !== "down")) return;
+    const all = await db
+      .select()
+      .from(itineraryLegs)
+      .where(
+        and(
+          eq(itineraryLegs.teamId, u.teamId),
+          eq(itineraryLegs.eventId, eventId),
+        ),
+      )
+      .orderBy(asc(itineraryLegs.orderIndex));
+    const idx = all.findIndex((l) => l.id === id);
+    if (idx === -1) return;
+    const swapWith = dir === "up" ? idx - 1 : idx + 1;
+    if (swapWith < 0 || swapWith >= all.length) return;
+    const a = all[idx];
+    const b = all[swapWith];
+    await db
+      .update(itineraryLegs)
+      .set({ orderIndex: b.orderIndex })
+      .where(eq(itineraryLegs.id, a.id));
+    await db
+      .update(itineraryLegs)
+      .set({ orderIndex: a.orderIndex })
+      .where(eq(itineraryLegs.id, b.id));
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  // ---- Hotel actions ----
+  async function addHotel(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const name = String(formData.get("name") ?? "").trim();
+    if (!name) return;
+    const address = String(formData.get("address") ?? "").trim() || null;
+    const confirmationNumber =
+      String(formData.get("confirmation_number") ?? "").trim() || null;
+    const checkInRaw = String(formData.get("check_in_date") ?? "").trim();
+    const checkOutRaw = String(formData.get("check_out_date") ?? "").trim();
+    const roomAssignments =
+      String(formData.get("room_assignments") ?? "").trim() || null;
+    const notes = String(formData.get("notes") ?? "").trim() || null;
+    await db.insert(hotelBookings).values({
+      teamId: u.teamId,
+      eventId,
+      name,
+      address,
+      confirmationNumber,
+      checkInDate: checkInRaw || null,
+      checkOutDate: checkOutRaw || null,
+      roomAssignments,
+      notes,
+    });
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteHotel(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    await db
+      .delete(hotelBookings)
+      .where(and(eq(hotelBookings.id, id), eq(hotelBookings.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  // ---- Meal plan actions ----
+  async function addMeal(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const what = String(formData.get("what") ?? "").trim();
+    if (!what) return;
+    const whereAt = String(formData.get("where_at") ?? "").trim() || null;
+    const whenRaw = String(formData.get("when_at") ?? "").trim();
+    const assigneeRaw = String(formData.get("assignee_user_id") ?? "");
+    await db.insert(mealPlanItems).values({
+      teamId: u.teamId,
+      eventId,
+      what,
+      whereAt,
+      whenAt: whenRaw ? new Date(whenRaw) : null,
+      assigneeUserId: assigneeRaw || null,
+    });
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteMeal(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    await db
+      .delete(mealPlanItems)
+      .where(and(eq(mealPlanItems.id, id), eq(mealPlanItems.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
   async function rebuildChecklists() {
     "use server";
     const u = await requireChief();
@@ -379,6 +634,346 @@ export default async function EventDetailPage({ params }: { params: Params }) {
 
         <section className="rc-empty-section mb-10">
           {PHASE_HINT[event.phase]}
+        </section>
+
+        <section className="mb-10">
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold tracking-tight">Itinerary</h2>
+            <div className="flex items-center gap-3 text-xs">
+              <Link
+                href={`/events/${eventId}`}
+                className={`rc-link ${!showOnlyMyLegs ? "underline" : ""}`}
+              >
+                All legs
+              </Link>
+              <span className="rc-muted">·</span>
+              <Link
+                href={`/events/${eventId}?legs=mine`}
+                className={`rc-link ${showOnlyMyLegs ? "underline" : ""}`}
+              >
+                My legs
+              </Link>
+              <span className="rc-muted">·</span>
+              <Link
+                href={`/events/${eventId}/itinerary/print`}
+                className="rc-link"
+              >
+                Print
+              </Link>
+            </div>
+          </div>
+
+          {me.role === "chief" ? (
+            <form action={addLeg} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
+              <input
+                name="from_location"
+                required
+                placeholder="From (e.g., Shop)"
+                className="rc-input sm:col-span-3"
+              />
+              <input
+                name="to_location"
+                required
+                placeholder="To (e.g., Service park)"
+                className="rc-input sm:col-span-3"
+              />
+              <select
+                name="vehicle_id"
+                defaultValue=""
+                className="rc-select sm:col-span-2"
+              >
+                <option value="">Vehicle (opt)</option>
+                {teamVehicles.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                name="depart_at"
+                type="datetime-local"
+                className="rc-input sm:col-span-2"
+                title="Depart"
+              />
+              <input
+                name="arrive_at"
+                type="datetime-local"
+                className="rc-input sm:col-span-2"
+                title="Arrive"
+              />
+              <select
+                name="assignee_user_id"
+                multiple
+                defaultValue={[]}
+                className="rc-select sm:col-span-6"
+                size={Math.min(crew.length, 4)}
+              >
+                {crew.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                name="notes"
+                placeholder="Notes (optional)"
+                className="rc-input sm:col-span-4"
+              />
+              <button type="submit" className="rc-btn rc-btn-primary sm:col-span-2">
+                Add leg
+              </button>
+            </form>
+          ) : null}
+
+          {(() => {
+            const filtered = showOnlyMyLegs
+              ? legs.filter((l) =>
+                  (assigneesByLeg.get(l.id) ?? []).some(
+                    (a) => a.userId === me.userId,
+                  ),
+                )
+              : legs;
+            if (filtered.length === 0) {
+              return (
+                <p className="rc-muted text-sm">
+                  {showOnlyMyLegs
+                    ? "You aren't on any legs."
+                    : "No legs yet."}
+                </p>
+              );
+            }
+            return (
+              <ul className="rc-list">
+                {filtered.map((l, idx) => {
+                  const ass = assigneesByLeg.get(l.id) ?? [];
+                  return (
+                    <li key={l.id} className="rc-list-row">
+                      <div className="flex-1">
+                        <div className="font-medium">
+                          <span className="rc-muted mr-2 font-mono text-xs">
+                            {idx + 1}.
+                          </span>
+                          {l.fromLocation} → {l.toLocation}
+                          {l.vehicleName ? (
+                            <span className="rc-muted text-sm"> · {l.vehicleName}</span>
+                          ) : null}
+                        </div>
+                        <div className="rc-muted mt-0.5 text-sm">
+                          {l.departAt
+                            ? `Dep ${l.departAt.toISOString().replace("T", " ").slice(0, 16)}`
+                            : "—"}
+                          {" → "}
+                          {l.arriveAt
+                            ? `Arr ${l.arriveAt.toISOString().replace("T", " ").slice(0, 16)}`
+                            : "—"}
+                        </div>
+                        {ass.length > 0 ? (
+                          <div className="rc-muted mt-1 text-xs">
+                            Crew: {ass.map((a) => a.userName).join(", ")}
+                          </div>
+                        ) : null}
+                        {l.notes ? (
+                          <div className="rc-muted mt-1 text-xs">{l.notes}</div>
+                        ) : null}
+                      </div>
+                      {me.role === "chief" ? (
+                        <div className="flex items-center gap-1">
+                          <form action={moveLeg}>
+                            <input type="hidden" name="id" value={l.id} />
+                            <input type="hidden" name="dir" value="up" />
+                            <button
+                              type="submit"
+                              disabled={idx === 0 && !showOnlyMyLegs}
+                              className="rc-btn rc-btn-ghost px-2 py-1 text-xs disabled:opacity-30"
+                            >
+                              ↑
+                            </button>
+                          </form>
+                          <form action={moveLeg}>
+                            <input type="hidden" name="id" value={l.id} />
+                            <input type="hidden" name="dir" value="down" />
+                            <button
+                              type="submit"
+                              className="rc-btn rc-btn-ghost px-2 py-1 text-xs"
+                            >
+                              ↓
+                            </button>
+                          </form>
+                          <form action={deleteLeg}>
+                            <input type="hidden" name="id" value={l.id} />
+                            <button
+                              type="submit"
+                              className="rc-btn rc-btn-danger px-2 py-1 text-xs"
+                            >
+                              ×
+                            </button>
+                          </form>
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          })()}
+        </section>
+
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">Hotels</h2>
+          {me.role === "chief" ? (
+            <form action={addHotel} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
+              <input
+                name="name"
+                required
+                placeholder="Hotel name"
+                className="rc-input sm:col-span-4"
+              />
+              <input
+                name="address"
+                placeholder="Address"
+                className="rc-input sm:col-span-4"
+              />
+              <input
+                name="confirmation_number"
+                placeholder="Confirmation #"
+                className="rc-input sm:col-span-2"
+              />
+              <input
+                name="check_in_date"
+                type="date"
+                className="rc-input sm:col-span-1"
+                title="Check in"
+              />
+              <input
+                name="check_out_date"
+                type="date"
+                className="rc-input sm:col-span-1"
+                title="Check out"
+              />
+              <input
+                name="room_assignments"
+                placeholder="Rooms (e.g., 'Rm 12 — chief+codriver, Rm 14 — mech')"
+                className="rc-input sm:col-span-8"
+              />
+              <input
+                name="notes"
+                placeholder="Notes"
+                className="rc-input sm:col-span-2"
+              />
+              <button type="submit" className="rc-btn rc-btn-primary sm:col-span-2">
+                Add
+              </button>
+            </form>
+          ) : null}
+          {hotels.length === 0 ? (
+            <p className="rc-muted text-sm">No hotel bookings yet.</p>
+          ) : (
+            <ul className="rc-list">
+              {hotels.map((h) => (
+                <li key={h.id} className="rc-list-row">
+                  <div className="flex-1">
+                    <div className="font-medium">{h.name}</div>
+                    <div className="rc-muted text-sm">
+                      {h.address ?? ""}
+                      {h.address && h.confirmationNumber ? " · " : ""}
+                      {h.confirmationNumber ? `Conf ${h.confirmationNumber}` : ""}
+                    </div>
+                    <div className="rc-muted text-xs">
+                      {h.checkInDate ? `In ${h.checkInDate}` : ""}
+                      {h.checkInDate && h.checkOutDate ? " · " : ""}
+                      {h.checkOutDate ? `Out ${h.checkOutDate}` : ""}
+                    </div>
+                    {h.roomAssignments ? (
+                      <div className="mt-1 text-sm">{h.roomAssignments}</div>
+                    ) : null}
+                    {h.notes ? (
+                      <div className="rc-muted mt-1 text-xs">{h.notes}</div>
+                    ) : null}
+                  </div>
+                  {me.role === "chief" ? (
+                    <form action={deleteHotel}>
+                      <input type="hidden" name="id" value={h.id} />
+                      <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
+                        ×
+                      </button>
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">Meal plan</h2>
+          {me.role === "chief" ? (
+            <form action={addMeal} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
+              <input
+                name="when_at"
+                type="datetime-local"
+                className="rc-input sm:col-span-3"
+              />
+              <input
+                name="where_at"
+                placeholder="Where (e.g., Service truck)"
+                className="rc-input sm:col-span-3"
+              />
+              <input
+                name="what"
+                required
+                placeholder="What (e.g., Sandwiches & coffee)"
+                className="rc-input sm:col-span-3"
+              />
+              <select
+                name="assignee_user_id"
+                defaultValue=""
+                className="rc-select sm:col-span-2"
+              >
+                <option value="">Who&apos;s bringing it</option>
+                {crew.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <button type="submit" className="rc-btn rc-btn-primary sm:col-span-1">
+                Add
+              </button>
+            </form>
+          ) : null}
+          {meals.length === 0 ? (
+            <p className="rc-muted text-sm">No meals planned yet.</p>
+          ) : (
+            <ul className="rc-list">
+              {meals.map((m) => (
+                <li key={m.id} className="rc-list-row">
+                  <div className="flex-1">
+                    <div className="font-medium">{m.what}</div>
+                    <div className="rc-muted text-sm">
+                      {m.whenAt
+                        ? m.whenAt.toISOString().replace("T", " ").slice(0, 16)
+                        : ""}
+                      {m.whenAt && m.whereAt ? " · " : ""}
+                      {m.whereAt ?? ""}
+                    </div>
+                    {m.assigneeName ? (
+                      <div className="rc-muted text-xs">
+                        {m.assigneeName} brings it
+                      </div>
+                    ) : null}
+                  </div>
+                  {me.role === "chief" ? (
+                    <form action={deleteMeal}>
+                      <input type="hidden" name="id" value={m.id} />
+                      <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
+                        ×
+                      </button>
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="mb-10">
