@@ -22,14 +22,53 @@ Rally Commander organizes the entire arc of a rally weekend in one place:
 
 ## Status
 
-🚧 **Pre-alpha.** PRD and v1 build plan are in. Code starts at Phase 1.
+🚧 **Pre-alpha.** Phase 1 (Foundation: auth, team, events, todos) is shipping. The rest of v1 is on the build plan.
 
 - **PRD:** [PRD.md](PRD.md) — problem statement, 59 user stories, scope decisions
 - **Build plan:** [plans/v1-build.md](plans/v1-build.md) — 11 phased vertical slices with acceptance criteria
 
 ## Self-host quickstart
 
-> Coming with Phase 1. Will be a one-command Fly.io launch + Postgres provisioning + first-user bootstrap.
+### Local development
+
+```bash
+# 1. clone and install
+git clone https://github.com/Kiasersosa/rally-commander.git
+cd rally-commander
+npm install
+
+# 2. configure env
+cp .env.example .env
+# edit .env: set DATABASE_URL, AUTH_SECRET (openssl rand -base64 32),
+# RESEND_API_KEY, EMAIL_FROM, and the RC_BOOTSTRAP_* vars
+
+# 3. provision schema and bootstrap the first team + chief
+npm run db:push
+npm run bootstrap
+
+# 4. run
+npm run dev
+# → http://localhost:3000
+```
+
+### Fly.io
+
+```bash
+fly launch --no-deploy            # creates the app
+fly postgres create               # separate Postgres cluster
+fly postgres attach <pg-app-name> # wires DATABASE_URL into the app
+fly secrets set \
+  AUTH_SECRET=$(openssl rand -base64 32) \
+  AUTH_URL=https://<your-app>.fly.dev \
+  RESEND_API_KEY=re_xxx \
+  EMAIL_FROM='Rally Commander <noreply@example.com>' \
+  RC_BOOTSTRAP_TEAM_NAME='My Rally Team' \
+  RC_BOOTSTRAP_CHIEF_EMAIL=chief@example.com \
+  RC_BOOTSTRAP_CHIEF_NAME='Crew Chief'
+fly deploy
+```
+
+The Docker entrypoint runs Drizzle migrations and the bootstrap script on each boot, then starts the Next.js server on port 3000.
 
 ## Stack
 
