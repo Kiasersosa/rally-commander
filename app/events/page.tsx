@@ -42,42 +42,47 @@ export default async function EventsPage() {
   return (
     <>
       <Nav user={user} />
-      <main className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="mb-6 text-2xl font-semibold">Season dashboard</h1>
+      <main className="mx-auto max-w-5xl px-6 py-10">
+        <header className="mb-8">
+          <h1 className="text-3xl font-semibold tracking-tight">Season dashboard</h1>
+          <p className="rc-muted mt-1 text-sm">
+            Every rally on the calendar. Click in for prep, todos, debrief.
+          </p>
+        </header>
 
         {user.role === "chief" ? (
           <form
             action={createEvent}
-            className="mb-8 grid grid-cols-1 gap-3 rounded border border-neutral-200 p-4 sm:grid-cols-4"
+            className="rc-card mb-8 grid grid-cols-1 gap-3 sm:grid-cols-12"
           >
             <input
               name="name"
               required
               placeholder="Event name (e.g., Olympus 2026)"
-              className="rounded border border-neutral-300 px-3 py-2 sm:col-span-2"
+              className="rc-input sm:col-span-5"
             />
             <input
               name="event_date"
               type="date"
               required
-              className="rounded border border-neutral-300 px-3 py-2"
+              className="rc-input sm:col-span-3"
             />
             <input
               name="location"
               required
               placeholder="Location"
-              className="rounded border border-neutral-300 px-3 py-2"
+              className="rc-input sm:col-span-2"
             />
             <input
               name="ara_round_number"
               type="number"
               min={1}
-              placeholder="ARA round #"
-              className="rounded border border-neutral-300 px-3 py-2"
+              placeholder="Round #"
+              className="rc-input sm:col-span-2"
             />
             <button
               type="submit"
-              className="rounded bg-neutral-900 px-3 py-2 text-white hover:bg-neutral-800 sm:col-span-3"
+              className="rc-btn rc-btn-primary sm:col-span-12"
             >
               Create event
             </button>
@@ -85,25 +90,30 @@ export default async function EventsPage() {
         ) : null}
 
         {rows.length === 0 ? (
-          <p className="text-neutral-500">No events yet.</p>
+          <div className="rc-empty-section text-center">
+            No events yet.{" "}
+            {user.role === "chief"
+              ? "Add your first one above."
+              : "Your chief hasn't scheduled one."}
+          </div>
         ) : (
-          <ul className="divide-y divide-neutral-200 rounded border border-neutral-200">
+          <ul className="rc-list">
             {rows.map((e) => (
-              <li key={e.id} className="flex items-center justify-between px-4 py-3">
+              <li key={e.id} className="rc-list-row">
                 <div>
                   <Link
                     href={`/events/${e.id}`}
-                    className="font-medium hover:underline"
+                    className="rc-link text-base font-semibold"
                   >
                     {e.name}
                   </Link>
-                  <div className="text-sm text-neutral-500">
+                  <div className="rc-muted text-sm">
                     {e.eventDate} · {e.location}
                     {e.araRoundNumber ? ` · ARA round ${e.araRoundNumber}` : ""}
                   </div>
                 </div>
-                <span className="rounded bg-neutral-100 px-2 py-1 text-xs uppercase tracking-wide text-neutral-600">
-                  {e.phase}
+                <span className={`rc-badge rc-badge-${e.phase}`}>
+                  {e.phase.replace("_", " ")}
                 </span>
               </li>
             ))}

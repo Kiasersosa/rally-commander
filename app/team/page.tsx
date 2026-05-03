@@ -16,6 +16,15 @@ const ROLES: UserRole[] = [
   "driver",
 ];
 
+const ROLE_LABEL: Record<UserRole, string> = {
+  chief: "Crew chief",
+  lead_mechanic: "Lead mechanic",
+  assistant: "Assistant",
+  gopher: "Gopher",
+  co_driver: "Co-driver",
+  driver: "Driver",
+};
+
 export default async function TeamPage() {
   const me = await getCurrentUser();
   if (!me) redirect("/login");
@@ -42,7 +51,6 @@ export default async function TeamPage() {
       throw new Error("email, name, and role required");
     }
 
-    // Find any existing row (active or revoked) on this team for this email.
     const [existing] = await db
       .select({ id: users.id, deletedAt: users.deletedAt })
       .from(users)
@@ -50,7 +58,6 @@ export default async function TeamPage() {
       .limit(1);
 
     if (existing) {
-      // Restore + update role+name if previously revoked.
       await db
         .update(users)
         .set({ name, role, deletedAt: null, updatedAt: new Date() })
@@ -64,7 +71,6 @@ export default async function TeamPage() {
       });
     }
 
-    // Send magic link.
     await signIn("resend", { email, redirect: false });
     revalidatePath("/team");
   }
@@ -99,78 +105,83 @@ export default async function TeamPage() {
   return (
     <>
       <Nav user={me} />
-      <main className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="mb-6 text-2xl font-semibold">Team</h1>
+      <main className="mx-auto max-w-4xl px-6 py-10">
+        <header className="mb-8">
+          <h1 className="text-3xl font-semibold tracking-tight">Team</h1>
+          <p className="rc-muted mt-1 text-sm">
+            Crew, roles, and invites. Magic-link login means no passwords to manage.
+          </p>
+        </header>
 
         {me.role === "chief" ? (
           <form
             action={invite}
-            className="mb-8 grid grid-cols-1 gap-3 rounded border border-neutral-200 p-4 sm:grid-cols-4"
+            className="rc-card mb-8 grid grid-cols-1 gap-3 sm:grid-cols-12"
           >
             <input
               name="name"
               required
               placeholder="Crew member name"
-              className="rounded border border-neutral-300 px-3 py-2"
+              className="rc-input sm:col-span-3"
             />
             <input
               name="email"
               type="email"
               required
               placeholder="email@example.com"
-              className="rounded border border-neutral-300 px-3 py-2"
+              className="rc-input sm:col-span-4"
             />
             <select
               name="role"
               required
-              className="rounded border border-neutral-300 px-3 py-2"
+              className="rc-select sm:col-span-3"
+              defaultValue=""
             >
+              <option value="" disabled>
+                Role…
+              </option>
               {ROLES.map((r) => (
                 <option key={r} value={r}>
-                  {r}
+                  {ROLE_LABEL[r]}
                 </option>
               ))}
             </select>
-            <button
-              type="submit"
-              className="rounded bg-neutral-900 px-3 py-2 text-white hover:bg-neutral-800"
-            >
+            <button type="submit" className="rc-btn rc-btn-primary sm:col-span-2">
               Invite
             </button>
           </form>
         ) : null}
 
-        <ul className="divide-y divide-neutral-200 rounded border border-neutral-200">
+        <ul className="rc-list">
           {crew.map((c) => (
-            <li
-              key={c.id}
-              className="flex items-center justify-between gap-3 px-4 py-3"
-            >
+            <li key={c.id} className="rc-list-row">
               <div>
-                <div className={c.deletedAt ? "text-neutral-400 line-through" : ""}>
-                  {c.name}{" "}
-                  <span className="text-sm text-neutral-500">({c.role})</span>
+                <div
+                  className={
+                    c.deletedAt
+                      ? "line-through decoration-[var(--muted)] text-[color:var(--muted)]"
+                      : "font-medium"
+                  }
+                >
+                  {c.name}
                 </div>
-                <div className="text-sm text-neutral-500">{c.email}</div>
+                <div className="rc-muted text-sm">
+                  {ROLE_LABEL[c.role]} · {c.email}
+                  {c.deletedAt ? " · revoked" : ""}
+                </div>
               </div>
               {me.role === "chief" && c.id !== me.userId ? (
                 c.deletedAt ? (
                   <form action={restore}>
                     <input type="hidden" name="user_id" value={c.id} />
-                    <button
-                      type="submit"
-                      className="rounded border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-50"
-                    >
+                    <button type="submit" className="rc-btn rc-btn-ghost text-sm">
                       Restore
                     </button>
                   </form>
                 ) : (
                   <form action={revoke}>
                     <input type="hidden" name="user_id" value={c.id} />
-                    <button
-                      type="submit"
-                      className="rounded border border-rose-300 px-3 py-1 text-sm text-rose-700 hover:bg-rose-50"
-                    >
+                    <button type="submit" className="rc-btn rc-btn-danger text-sm">
                       Revoke
                     </button>
                   </form>

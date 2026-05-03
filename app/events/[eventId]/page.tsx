@@ -9,6 +9,16 @@ import { Nav } from "@/components/Nav";
 
 type Params = Promise<{ eventId: string }>;
 
+const PHASE_HINT: Record<string, string> = {
+  planning:
+    "Planning phase — events, hotels, and initial logistics modules will appear here in later phases.",
+  prep: "Prep phase — work orders, parts ordering, and packing checklists will appear here.",
+  on_event:
+    "On-event phase — incident logging, service-stop timer, and crew status will appear here.",
+  post_event:
+    "Post-event phase — receipts reconciliation and post-event teardown checklists will appear here.",
+};
+
 export default async function EventDetailPage({ params }: { params: Params }) {
   const me = await getCurrentUser();
   if (!me) redirect("/login");
@@ -33,7 +43,6 @@ export default async function EventDetailPage({ params }: { params: Params }) {
     .where(and(eq(users.teamId, me.teamId), isNull(users.deletedAt)))
     .orderBy(asc(users.name));
 
-  // Chief sees every todo on the event; crew sees only their own.
   const todoRows = await db
     .select({
       id: todos.id,
@@ -112,7 +121,6 @@ export default async function EventDetailPage({ params }: { params: Params }) {
     const u = await requireSession();
     const todoId = String(formData.get("todo_id") ?? "");
     if (!todoId) return;
-    // assignee can complete; chief can complete anything on their team
     const [t] = await db
       .select({ assigneeUserId: todos.assigneeUserId })
       .from(todos)
@@ -138,25 +146,22 @@ export default async function EventDetailPage({ params }: { params: Params }) {
   return (
     <>
       <Nav user={me} />
-      <main className="mx-auto max-w-4xl px-6 py-8">
-        <header className="mb-6 flex items-start justify-between gap-4">
+      <main className="mx-auto max-w-4xl px-6 py-10">
+        <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold">{event.name}</h1>
-            <div className="text-sm text-neutral-500">
+            <h1 className="text-3xl font-semibold tracking-tight">{event.name}</h1>
+            <div className="rc-muted mt-1 text-sm">
               {event.eventDate} · {event.location}
               {event.araRoundNumber ? ` · ARA round ${event.araRoundNumber}` : ""}
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="rounded bg-neutral-100 px-3 py-1 text-sm uppercase tracking-wide">
-              {event.phase}
+            <span className={`rc-badge rc-badge-${event.phase}`}>
+              {event.phase.replace("_", " ")}
             </span>
             {canAdvance ? (
               <form action={advancePhase}>
-                <button
-                  type="submit"
-                  className="rounded bg-neutral-900 px-3 py-1 text-sm text-white hover:bg-neutral-800"
-                >
+                <button type="submit" className="rc-btn rc-btn-primary text-sm">
                   Advance phase →
                 </button>
               </form>
@@ -164,46 +169,40 @@ export default async function EventDetailPage({ params }: { params: Params }) {
           </div>
         </header>
 
-        {/* Phase-appropriate empty modules placeholder. Each phase will gain
-            its own modules in later phases (vehicles, work orders, etc.). */}
-        <section className="mb-8 rounded border border-dashed border-neutral-300 p-4 text-sm text-neutral-500">
-          {event.phase === "planning" &&
-            "Planning phase — events, hotels, and initial logistics modules will appear here in later phases."}
-          {event.phase === "prep" &&
-            "Prep phase — work orders, parts ordering, and packing checklists will appear here."}
-          {event.phase === "on_event" &&
-            "On-event phase — incident logging, service-stop timer, and crew status will appear here."}
-          {event.phase === "post_event" &&
-            "Post-event phase — receipts reconciliation and post-event teardown checklists will appear here."}
+        <section className="rc-empty-section mb-10">
+          {PHASE_HINT[event.phase]}
         </section>
 
-        <section className="mb-8">
-          <h2 className="mb-3 text-lg font-semibold">
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">
             {me.role === "chief" ? "Event todos" : "My todos"}
           </h2>
 
           {me.role === "chief" ? (
             <form
               action={createTodo}
-              className="mb-4 grid grid-cols-1 gap-2 rounded border border-neutral-200 p-3 sm:grid-cols-12"
+              className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12"
             >
               <input
                 name="title"
                 required
                 placeholder="What needs doing?"
-                className="rounded border border-neutral-300 px-3 py-2 sm:col-span-5"
+                className="rc-input sm:col-span-5"
               />
               <input
                 name="description"
                 placeholder="Description (optional)"
-                className="rounded border border-neutral-300 px-3 py-2 sm:col-span-4"
+                className="rc-input sm:col-span-4"
               />
               <select
                 name="assignee_user_id"
                 required
-                className="rounded border border-neutral-300 px-3 py-2 sm:col-span-2"
+                className="rc-select sm:col-span-2"
+                defaultValue=""
               >
-                <option value="">Assign to…</option>
+                <option value="" disabled>
+                  Assign to…
+                </option>
                 {crew.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -212,7 +211,7 @@ export default async function EventDetailPage({ params }: { params: Params }) {
               </select>
               <button
                 type="submit"
-                className="rounded bg-neutral-900 px-3 py-2 text-white hover:bg-neutral-800 sm:col-span-1"
+                className="rc-btn rc-btn-primary sm:col-span-1"
               >
                 Add
               </button>
@@ -220,45 +219,41 @@ export default async function EventDetailPage({ params }: { params: Params }) {
           ) : null}
 
           {todoRows.length === 0 ? (
-            <p className="text-neutral-500">No todos.</p>
+            <p className="rc-muted text-sm">No todos.</p>
           ) : (
-            <ul className="divide-y divide-neutral-200 rounded border border-neutral-200">
+            <ul className="rc-list">
               {todoRows.map((t) => {
                 const canComplete =
                   !t.completedAt &&
                   (me.role === "chief" || t.assigneeUserId === me.userId);
                 return (
-                  <li
-                    key={t.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3"
-                  >
+                  <li key={t.id} className="rc-list-row">
                     <div>
                       <div
                         className={
                           t.completedAt
-                            ? "line-through decoration-neutral-400"
-                            : ""
+                            ? "line-through decoration-[var(--muted)] text-[color:var(--muted)]"
+                            : "font-medium"
                         }
                       >
                         {t.title}
                       </div>
                       {t.description ? (
-                        <div className="text-sm text-neutral-500">
+                        <div className="rc-muted mt-0.5 text-sm">
                           {t.description}
                         </div>
                       ) : null}
-                      <div className="text-xs text-neutral-400">
+                      <div className="rc-muted mt-1 text-xs">
                         Assigned to {t.assigneeName}
-                        {t.completedAt ? ` · done ${t.completedAt.toISOString().slice(0, 10)}` : ""}
+                        {t.completedAt
+                          ? ` · done ${t.completedAt.toISOString().slice(0, 10)}`
+                          : ""}
                       </div>
                     </div>
                     {canComplete ? (
                       <form action={completeTodo}>
                         <input type="hidden" name="todo_id" value={t.id} />
-                        <button
-                          type="submit"
-                          className="rounded border border-neutral-300 px-3 py-1 text-sm hover:bg-neutral-50"
-                        >
+                        <button type="submit" className="rc-btn rc-btn-ghost text-sm">
                           Mark done
                         </button>
                       </form>
@@ -271,27 +266,28 @@ export default async function EventDetailPage({ params }: { params: Params }) {
         </section>
 
         <section>
-          <h2 className="mb-3 text-lg font-semibold">Post-event debrief</h2>
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">
+            Post-event debrief
+          </h2>
           {me.role === "chief" ? (
-            <form action={saveDebrief}>
+            <form action={saveDebrief} className="rc-card flex flex-col gap-3">
               <textarea
                 name="debrief_notes"
                 defaultValue={event.debriefNotes ?? ""}
                 placeholder="What went well, what didn't, lessons for next event."
                 rows={6}
-                className="w-full rounded border border-neutral-300 px-3 py-2"
+                className="rc-textarea"
               />
-              <button
-                type="submit"
-                className="mt-2 rounded bg-neutral-900 px-3 py-2 text-white hover:bg-neutral-800"
-              >
+              <button type="submit" className="rc-btn rc-btn-primary self-start">
                 Save debrief
               </button>
             </form>
           ) : (
-            <p className="whitespace-pre-wrap rounded border border-neutral-200 bg-neutral-50 p-3 text-sm">
-              {event.debriefNotes ?? <span className="text-neutral-400">No debrief yet.</span>}
-            </p>
+            <div className="rc-card whitespace-pre-wrap text-sm">
+              {event.debriefNotes ?? (
+                <span className="rc-muted">No debrief yet.</span>
+              )}
+            </div>
           )}
         </section>
       </main>
