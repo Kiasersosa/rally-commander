@@ -1,15 +1,16 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  checklistInstanceItems,
   checklistInstances,
   checklistSignoffs,
   events,
   vehicles,
 } from "@/lib/db/schema";
-import { getCurrentUser, requireSession } from "@/lib/authz";
+import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { KIND_LABEL, loadChecklistState } from "@/lib/checklists";
 
@@ -65,6 +66,105 @@ export default async function ChecklistInstancePage({
     revalidatePath(`/checklists/${instanceId}`);
   }
 
+  async function addAdHocItem(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const label = String(formData.get("label") ?? "").trim();
+    const description = String(formData.get("description") ?? "").trim() || null;
+    if (!label) return;
+    const [{ maxOrder }] = await db
+      .select({
+        maxOrder: sql<number>`COALESCE(MAX(${checklistInstanceItems.orderIndex}), -1)::int`,
+      })
+      .from(checklistInstanceItems)
+      .where(
+        and(
+          eq(checklistInstanceItems.teamId, u.teamId),
+          eq(checklistInstanceItems.instanceId, instanceId),
+        ),
+      );
+    await db.insert(checklistInstanceItems).values({
+      teamId: u.teamId,
+      instanceId,
+      orderIndex: (Number(maxOrder) ?? -1) + 1,
+      label,
+      description,
+    });
+    revalidatePath(`/checklists/${instanceId}`);
+  }
+
+  async function copyFromPriorEvent() {
+    "use server";
+    const u = await requireChief();
+    if (meta.kind !== "packing") return;
+    // Find the most recent prior packing instance for this vehicle on a
+    // DIFFERENT event, then copy any items not already present.
+    const [prior] = await db
+      .select({ id: checklistInstances.id })
+      .from(checklistInstances)
+      .innerJoin(events, eq(events.id, checklistInstances.eventId))
+      .where(
+        and(
+          eq(checklistInstances.teamId, u.teamId),
+          eq(checklistInstances.vehicleId, meta.vehicleId),
+          eq(checklistInstances.kind, "packing"),
+          ne(checklistInstances.eventId, meta.eventId),
+        ),
+      )
+      .orderBy(desc(events.eventDate), desc(checklistInstances.createdAt))
+      .limit(1);
+    if (!prior) return;
+    const priorItems = await db
+      .select({
+        label: checklistInstanceItems.label,
+        description: checklistInstanceItems.description,
+        orderIndex: checklistInstanceItems.orderIndex,
+      })
+      .from(checklistInstanceItems)
+      .where(
+        and(
+          eq(checklistInstanceItems.teamId, u.teamId),
+          eq(checklistInstanceItems.instanceId, prior.id),
+        ),
+      )
+      .orderBy(asc(checklistInstanceItems.orderIndex));
+    const currentItems = await db
+      .select({ label: checklistInstanceItems.label })
+      .from(checklistInstanceItems)
+      .where(
+        and(
+          eq(checklistInstanceItems.teamId, u.teamId),
+          eq(checklistInstanceItems.instanceId, instanceId),
+        ),
+      );
+    const have = new Set(currentItems.map((i) => i.label));
+    const [{ maxOrder }] = await db
+      .select({
+        maxOrder: sql<number>`COALESCE(MAX(${checklistInstanceItems.orderIndex}), -1)::int`,
+      })
+      .from(checklistInstanceItems)
+      .where(
+        and(
+          eq(checklistInstanceItems.teamId, u.teamId),
+          eq(checklistInstanceItems.instanceId, instanceId),
+        ),
+      );
+    let next = (Number(maxOrder) ?? -1) + 1;
+    const toInsert = priorItems
+      .filter((i) => !have.has(i.label))
+      .map((i) => ({
+        teamId: u.teamId,
+        instanceId,
+        orderIndex: next++,
+        label: i.label,
+        description: i.description,
+      }));
+    if (toInsert.length > 0) {
+      await db.insert(checklistInstanceItems).values(toInsert);
+    }
+    revalidatePath(`/checklists/${instanceId}`);
+  }
+
   async function unsignItem(formData: FormData) {
     "use server";
     const u = await requireSession();
@@ -114,6 +214,43 @@ export default async function ChecklistInstancePage({
             </Link>
           </div>
         </header>
+
+        {meta.kind === "packing" ? (
+          <section className="mb-6 grid gap-3 sm:grid-cols-2">
+            <form
+              action={addAdHocItem}
+              className="rc-card flex flex-col gap-2"
+            >
+              <label className="text-sm font-medium">Add an ad-hoc item</label>
+              <input
+                name="label"
+                required
+                placeholder="e.g., ECU laptop"
+                className="rc-input"
+              />
+              <input
+                name="description"
+                placeholder="Notes (optional)"
+                className="rc-input"
+              />
+              <button type="submit" className="rc-btn rc-btn-primary self-start text-sm">
+                Add
+              </button>
+            </form>
+            {me.role === "chief" ? (
+              <form action={copyFromPriorEvent} className="rc-card flex flex-col gap-2">
+                <label className="text-sm font-medium">Copy from prior event</label>
+                <p className="rc-muted text-xs">
+                  Pulls items from this vehicle&apos;s most recent prior packing
+                  list. Items already present (matched by label) are skipped.
+                </p>
+                <button type="submit" className="rc-btn rc-btn-ghost self-start text-sm">
+                  Copy missing items
+                </button>
+              </form>
+            ) : null}
+          </section>
+        ) : null}
 
         {state.totalItems === 0 ? (
           <div className="rc-empty-section text-center">

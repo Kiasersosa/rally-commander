@@ -7,9 +7,13 @@ import {
   checklistInstances,
   checklistSignoffs,
   events,
+  orderListItems,
+  tireNeeds,
   todos,
   users,
   vehicles,
+  workOrders,
+  type OrderListStatus,
 } from "@/lib/db/schema";
 import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
 import { advance } from "@/lib/event-lifecycle";
@@ -53,6 +57,55 @@ export default async function EventDetailPage({ params }: { params: Params }) {
     .from(users)
     .where(and(eq(users.teamId, me.teamId), isNull(users.deletedAt)))
     .orderBy(asc(users.name));
+
+  // Order list items
+  const orderListRows = await db
+    .select({
+      id: orderListItems.id,
+      title: orderListItems.title,
+      qty: orderListItems.qty,
+      status: orderListItems.status,
+      notes: orderListItems.notes,
+      workOrderId: orderListItems.workOrderId,
+      workOrderTitle: workOrders.title,
+      vehicleName: vehicles.name,
+    })
+    .from(orderListItems)
+    .leftJoin(workOrders, eq(workOrders.id, orderListItems.workOrderId))
+    .leftJoin(vehicles, eq(vehicles.id, workOrders.vehicleId))
+    .where(
+      and(
+        eq(orderListItems.teamId, me.teamId),
+        eq(orderListItems.eventId, eventId),
+      ),
+    )
+    .orderBy(asc(orderListItems.status), asc(orderListItems.createdAt));
+
+  // Open work orders for this team — used to suggest order-list source linkage
+  const openWosForLink = await db
+    .select({
+      id: workOrders.id,
+      title: workOrders.title,
+      vehicleName: vehicles.name,
+    })
+    .from(workOrders)
+    .innerJoin(vehicles, eq(vehicles.id, workOrders.vehicleId))
+    .where(
+      and(
+        eq(workOrders.teamId, me.teamId),
+        isNull(workOrders.closedAt),
+      ),
+    )
+    .orderBy(asc(vehicles.name));
+
+  // Tire needs
+  const tireRows = await db
+    .select()
+    .from(tireNeeds)
+    .where(
+      and(eq(tireNeeds.teamId, me.teamId), eq(tireNeeds.eventId, eventId)),
+    )
+    .orderBy(asc(tireNeeds.createdAt));
 
   // Per-vehicle checklist instances with completion stats
   const checklistRows = await db
@@ -148,6 +201,100 @@ export default async function EventDetailPage({ params }: { params: Params }) {
     revalidatePath(`/events/${eventId}`);
   }
 
+  // ---- Order list actions ----
+  async function addOrderItem(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const title = String(formData.get("title") ?? "").trim();
+    const qty = Number.parseInt(String(formData.get("qty") ?? "1"), 10) || 1;
+    const woRaw = String(formData.get("work_order_id") ?? "");
+    const workOrderId = woRaw || null;
+    if (!title) return;
+    await db.insert(orderListItems).values({
+      teamId: u.teamId,
+      eventId,
+      title,
+      qty,
+      workOrderId,
+    });
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function setOrderStatus(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const id = String(formData.get("id") ?? "");
+    const status = String(formData.get("status") ?? "") as OrderListStatus;
+    if (!id || !["needed", "ordered", "received", "packed"].includes(status)) return;
+    await db
+      .update(orderListItems)
+      .set({ status, updatedAt: new Date() })
+      .where(and(eq(orderListItems.id, id), eq(orderListItems.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteOrderItem(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    await db
+      .delete(orderListItems)
+      .where(and(eq(orderListItems.id, id), eq(orderListItems.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  // ---- Tire actions ----
+  async function addTire(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const compound = String(formData.get("compound") ?? "").trim();
+    const count = Number.parseInt(String(formData.get("count") ?? "4"), 10) || 4;
+    const notes = String(formData.get("notes") ?? "").trim() || null;
+    if (!compound) return;
+    await db.insert(tireNeeds).values({
+      teamId: u.teamId,
+      eventId,
+      compound,
+      count,
+      notes,
+    });
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function toggleTireFlag(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const id = String(formData.get("id") ?? "");
+    const which = String(formData.get("which") ?? "");
+    const isOn = String(formData.get("on") ?? "") === "1";
+    if (!id || (which !== "ordered" && which !== "received")) return;
+    const ts = isOn ? new Date() : null;
+    if (which === "ordered") {
+      await db
+        .update(tireNeeds)
+        .set({ orderedAt: ts, updatedAt: new Date() })
+        .where(and(eq(tireNeeds.id, id), eq(tireNeeds.teamId, u.teamId)));
+    } else {
+      await db
+        .update(tireNeeds)
+        .set({ receivedAt: ts, updatedAt: new Date() })
+        .where(and(eq(tireNeeds.id, id), eq(tireNeeds.teamId, u.teamId)));
+    }
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteTire(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    await db
+      .delete(tireNeeds)
+      .where(and(eq(tireNeeds.id, id), eq(tireNeeds.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
   async function rebuildChecklists() {
     "use server";
     const u = await requireChief();
@@ -182,6 +329,20 @@ export default async function EventDetailPage({ params }: { params: Params }) {
 
   const canAdvance = me.role === "chief" && event.phase !== "post_event";
 
+  // % ready to ship across all packing instances on this event
+  const packingRows = checklistRows.filter((r) => r.kind === "packing");
+  const packingTotal = packingRows.reduce((n, r) => n + Number(r.total), 0);
+  const packingSigned = packingRows.reduce((n, r) => n + Number(r.signed), 0);
+  const readyPct =
+    packingTotal === 0 ? null : Math.round((packingSigned / packingTotal) * 100);
+
+  const ORDER_STATUSES: OrderListStatus[] = [
+    "needed",
+    "ordered",
+    "received",
+    "packed",
+  ];
+
   return (
     <>
       <Nav user={me} />
@@ -195,6 +356,14 @@ export default async function EventDetailPage({ params }: { params: Params }) {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {readyPct !== null ? (
+              <span
+                className={`rc-badge rc-badge-${readyPct === 100 ? "on_event" : readyPct === 0 ? "post_event" : "prep"}`}
+                title="Ready to ship: signed packing items / total"
+              >
+                {readyPct}% ready
+              </span>
+            ) : null}
             <span className={`rc-badge rc-badge-${event.phase}`}>
               {event.phase.replace("_", " ")}
             </span>
@@ -210,6 +379,169 @@ export default async function EventDetailPage({ params }: { params: Params }) {
 
         <section className="rc-empty-section mb-10">
           {PHASE_HINT[event.phase]}
+        </section>
+
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">
+            Parts to order
+          </h2>
+          <form
+            action={addOrderItem}
+            className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12"
+          >
+            <input
+              name="title"
+              required
+              placeholder="Part (e.g., Front strut)"
+              className="rc-input sm:col-span-5"
+            />
+            <input
+              name="qty"
+              type="number"
+              min={1}
+              defaultValue={1}
+              className="rc-input sm:col-span-1"
+            />
+            <select
+              name="work_order_id"
+              defaultValue=""
+              className="rc-select sm:col-span-4"
+            >
+              <option value="">Linked WO (optional)</option>
+              {openWosForLink.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.vehicleName} · {w.title}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="rc-btn rc-btn-primary sm:col-span-2">
+              Add
+            </button>
+          </form>
+          {orderListRows.length === 0 ? (
+            <p className="rc-muted text-sm">No parts to order yet.</p>
+          ) : (
+            <ul className="rc-list">
+              {orderListRows.map((it) => (
+                <li key={it.id} className="rc-list-row">
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {it.qty}× {it.title}
+                    </div>
+                    {it.workOrderTitle ? (
+                      <div className="rc-muted text-xs">
+                        For {it.vehicleName} · {it.workOrderTitle}
+                      </div>
+                    ) : null}
+                  </div>
+                  <form action={setOrderStatus} className="flex items-center gap-2">
+                    <input type="hidden" name="id" value={it.id} />
+                    <select
+                      name="status"
+                      defaultValue={it.status}
+                      className="rc-select py-1 text-sm"
+                    >
+                      {ORDER_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit" className="rc-btn rc-btn-ghost text-xs">
+                      Save
+                    </button>
+                  </form>
+                  <form action={deleteOrderItem}>
+                    <input type="hidden" name="id" value={it.id} />
+                    <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
+                      ×
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mb-10">
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">
+            Tires needed
+          </h2>
+          <form
+            action={addTire}
+            className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12"
+          >
+            <input
+              name="compound"
+              required
+              placeholder="Compound (e.g., DMACK Gravel Hard)"
+              className="rc-input sm:col-span-5"
+            />
+            <input
+              name="count"
+              type="number"
+              min={1}
+              defaultValue={4}
+              className="rc-input sm:col-span-1"
+            />
+            <input
+              name="notes"
+              placeholder="Notes"
+              className="rc-input sm:col-span-4"
+            />
+            <button type="submit" className="rc-btn rc-btn-primary sm:col-span-2">
+              Add
+            </button>
+          </form>
+          {tireRows.length === 0 ? (
+            <p className="rc-muted text-sm">No tires logged yet.</p>
+          ) : (
+            <ul className="rc-list">
+              {tireRows.map((t) => (
+                <li key={t.id} className="rc-list-row">
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {t.count}× {t.compound}
+                    </div>
+                    {t.notes ? (
+                      <div className="rc-muted text-xs">{t.notes}</div>
+                    ) : null}
+                    <div className="rc-muted mt-0.5 text-xs">
+                      {t.orderedAt
+                        ? `Ordered ${t.orderedAt.toISOString().slice(0, 10)}`
+                        : "Not ordered"}
+                      {" · "}
+                      {t.receivedAt
+                        ? `Received ${t.receivedAt.toISOString().slice(0, 10)}`
+                        : "Not received"}
+                    </div>
+                  </div>
+                  <form action={toggleTireFlag}>
+                    <input type="hidden" name="id" value={t.id} />
+                    <input type="hidden" name="which" value="ordered" />
+                    <input type="hidden" name="on" value={t.orderedAt ? "0" : "1"} />
+                    <button type="submit" className="rc-btn rc-btn-ghost text-xs">
+                      {t.orderedAt ? "Un-order" : "Mark ordered"}
+                    </button>
+                  </form>
+                  <form action={toggleTireFlag}>
+                    <input type="hidden" name="id" value={t.id} />
+                    <input type="hidden" name="which" value="received" />
+                    <input type="hidden" name="on" value={t.receivedAt ? "0" : "1"} />
+                    <button type="submit" className="rc-btn rc-btn-ghost text-xs">
+                      {t.receivedAt ? "Un-receive" : "Mark received"}
+                    </button>
+                  </form>
+                  <form action={deleteTire}>
+                    <input type="hidden" name="id" value={t.id} />
+                    <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
+                      ×
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="mb-10">

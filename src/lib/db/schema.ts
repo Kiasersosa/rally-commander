@@ -46,6 +46,14 @@ export const workOrderStatusEnum = pgEnum("work_order_status", [
 export const checklistKindEnum = pgEnum("checklist_kind", [
   "pre_event_inspection",
   "post_event_teardown",
+  "packing",
+]);
+
+export const orderListStatusEnum = pgEnum("order_list_status", [
+  "needed",
+  "ordered",
+  "received",
+  "packed",
 ]);
 
 // ---------- domain ----------
@@ -357,6 +365,56 @@ export const checklistSignoffs = pgTable(
   }),
 );
 
+// ---------- Phase 4: order lists, tires ----------
+
+export const orderListItems = pgTable(
+  "order_list_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    workOrderId: uuid("work_order_id").references(() => workOrders.id, {
+      onDelete: "set null",
+    }),
+    title: text("title").notNull(),
+    qty: integer("qty").notNull().default(1),
+    status: orderListStatusEnum("status").notNull().default("needed"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamEventIdx: index("order_list_items_team_event_idx").on(t.teamId, t.eventId),
+  }),
+);
+
+export const tireNeeds = pgTable(
+  "tire_needs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    compound: text("compound").notNull(),
+    count: integer("count").notNull().default(4),
+    orderedAt: timestamp("ordered_at", { withTimezone: true }),
+    receivedAt: timestamp("received_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamEventIdx: index("tire_needs_team_event_idx").on(t.teamId, t.eventId),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -436,6 +494,12 @@ export type NewChecklistInstanceItem = typeof checklistInstanceItems.$inferInser
 export type ChecklistSignoff = typeof checklistSignoffs.$inferSelect;
 export type NewChecklistSignoff = typeof checklistSignoffs.$inferInsert;
 export type ChecklistKind = (typeof checklistKindEnum.enumValues)[number];
+
+export type OrderListItem = typeof orderListItems.$inferSelect;
+export type NewOrderListItem = typeof orderListItems.$inferInsert;
+export type OrderListStatus = (typeof orderListStatusEnum.enumValues)[number];
+export type TireNeed = typeof tireNeeds.$inferSelect;
+export type NewTireNeed = typeof tireNeeds.$inferInsert;
 
 // boolean export to silence unused import warnings if added later
 void boolean;

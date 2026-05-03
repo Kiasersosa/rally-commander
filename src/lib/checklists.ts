@@ -17,11 +17,13 @@ import { deriveState, type EngineItem, type EngineSignoff } from "./checklist-en
 export const KIND_LABEL: Record<ChecklistKind, string> = {
   pre_event_inspection: "Pre-event inspection",
   post_event_teardown: "Post-event teardown",
+  packing: "Packing",
 };
 
 export const ALL_KINDS: readonly ChecklistKind[] = [
   "pre_event_inspection",
   "post_event_teardown",
+  "packing",
 ] as const;
 
 /**
