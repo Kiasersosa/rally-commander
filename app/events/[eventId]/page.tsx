@@ -6,12 +6,14 @@ import {
   checklistInstanceItems,
   checklistInstances,
   checklistSignoffs,
+  eventStages,
   events,
   hotelBookings,
   itineraryLegAssignees,
   itineraryLegs,
   mealPlanItems,
   orderListItems,
+  recceScheduleEntries,
   tireNeeds,
   todos,
   users,
@@ -23,7 +25,7 @@ import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
 import { advance } from "@/lib/event-lifecycle";
 import { Nav } from "@/components/Nav";
 import { instantiateChecklistsForEvent, KIND_LABEL } from "@/lib/checklists";
-import { sql } from "drizzle-orm";
+import { aliasedTable, sql } from "drizzle-orm";
 import Link from "next/link";
 
 type Params = Promise<{ eventId: string }>;
@@ -198,6 +200,52 @@ export default async function EventDetailPage({
       ),
     )
     .orderBy(asc(mealPlanItems.whenAt), asc(mealPlanItems.createdAt));
+
+  // Stages and recce schedule
+  const stages = await db
+    .select()
+    .from(eventStages)
+    .where(
+      and(
+        eq(eventStages.teamId, me.teamId),
+        eq(eventStages.eventId, eventId),
+      ),
+    )
+    .orderBy(asc(eventStages.stageNumber));
+
+  // Distinct alias users for driver vs codriver joins
+  const driverUsers = aliasedTable(users, "driver_users");
+  const coDriverUsers = aliasedTable(users, "codriver_users");
+
+  const recceRows = await db
+    .select({
+      id: recceScheduleEntries.id,
+      stageId: recceScheduleEntries.stageId,
+      stageNumber: eventStages.stageNumber,
+      stageName: eventStages.name,
+      day: recceScheduleEntries.day,
+      passNumber: recceScheduleEntries.passNumber,
+      driverUserId: recceScheduleEntries.driverUserId,
+      driverName: driverUsers.name,
+      coDriverUserId: recceScheduleEntries.coDriverUserId,
+      coDriverName: coDriverUsers.name,
+      notes: recceScheduleEntries.notes,
+    })
+    .from(recceScheduleEntries)
+    .innerJoin(eventStages, eq(eventStages.id, recceScheduleEntries.stageId))
+    .leftJoin(driverUsers, eq(driverUsers.id, recceScheduleEntries.driverUserId))
+    .leftJoin(coDriverUsers, eq(coDriverUsers.id, recceScheduleEntries.coDriverUserId))
+    .where(
+      and(
+        eq(recceScheduleEntries.teamId, me.teamId),
+        eq(recceScheduleEntries.eventId, eventId),
+      ),
+    )
+    .orderBy(
+      asc(recceScheduleEntries.day),
+      asc(eventStages.stageNumber),
+      asc(recceScheduleEntries.passNumber),
+    );
 
   // Per-vehicle checklist instances with completion stats
   const checklistRows = await db
@@ -550,6 +598,89 @@ export default async function EventDetailPage({
     revalidatePath(`/events/${eventId}`);
   }
 
+  // ---- Recce actions ----
+  async function addStage(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const stageNumber = Number.parseInt(
+      String(formData.get("stage_number") ?? ""),
+      10,
+    );
+    const name = String(formData.get("name") ?? "").trim();
+    const notes = String(formData.get("notes") ?? "").trim() || null;
+    if (!Number.isFinite(stageNumber) || !name) return;
+    await db.insert(eventStages).values({
+      teamId: u.teamId,
+      eventId,
+      stageNumber,
+      name,
+      notes,
+    });
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteStage(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    await db
+      .delete(eventStages)
+      .where(and(eq(eventStages.id, id), eq(eventStages.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function addRecceEntry(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const stageId = String(formData.get("stage_id") ?? "");
+    const dayRaw = String(formData.get("day") ?? "").trim();
+    const passNumber =
+      Number.parseInt(String(formData.get("pass_number") ?? "1"), 10) || 1;
+    const driverRaw = String(formData.get("driver_user_id") ?? "");
+    const codriverRaw = String(formData.get("co_driver_user_id") ?? "");
+    const notes = String(formData.get("notes") ?? "").trim() || null;
+    if (!stageId) return;
+    await db.insert(recceScheduleEntries).values({
+      teamId: u.teamId,
+      eventId,
+      stageId,
+      day: dayRaw || null,
+      passNumber,
+      driverUserId: driverRaw || null,
+      coDriverUserId: codriverRaw || null,
+      notes,
+    });
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteRecceEntry(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    await db
+      .delete(recceScheduleEntries)
+      .where(
+        and(
+          eq(recceScheduleEntries.id, id),
+          eq(recceScheduleEntries.teamId, u.teamId),
+        ),
+      );
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function saveRecceLogistics(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const notes = String(formData.get("recce_logistics_notes") ?? "");
+    await db
+      .update(events)
+      .set({ recceLogisticsNotes: notes, updatedAt: new Date() })
+      .where(and(eq(events.id, eventId), eq(events.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
   async function rebuildChecklists() {
     "use server";
     const u = await requireChief();
@@ -816,6 +947,224 @@ export default async function EventDetailPage({
               </ul>
             );
           })()}
+        </section>
+
+        <section className="mb-10">
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold tracking-tight">Recce</h2>
+            <Link
+              href={`/events/${eventId}/recce/print`}
+              className="rc-link text-xs"
+            >
+              Print
+            </Link>
+          </div>
+
+          {me.role === "chief" ? (
+            <form
+              action={addStage}
+              className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
+            >
+              <input
+                name="stage_number"
+                type="number"
+                min={1}
+                required
+                placeholder="#"
+                className="rc-input sm:col-span-1"
+              />
+              <input
+                name="name"
+                required
+                placeholder="Stage name (e.g., 'Lulu')"
+                className="rc-input sm:col-span-5"
+              />
+              <input
+                name="notes"
+                placeholder="Notes (length, gravel/tarmac, etc.)"
+                className="rc-input sm:col-span-4"
+              />
+              <button type="submit" className="rc-btn rc-btn-primary sm:col-span-2">
+                Add stage
+              </button>
+            </form>
+          ) : null}
+
+          {stages.length === 0 ? (
+            <p className="rc-muted mb-4 text-sm">
+              No stages defined yet.{" "}
+              {me.role === "chief"
+                ? "Add the first one above."
+                : "Your chief hasn't added stages."}
+            </p>
+          ) : (
+            <ul className="rc-list mb-4">
+              {stages.map((s) => (
+                <li key={s.id} className="rc-list-row">
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      <span className="rc-muted mr-2 font-mono text-xs">
+                        SS{s.stageNumber}
+                      </span>
+                      {s.name}
+                    </div>
+                    {s.notes ? (
+                      <div className="rc-muted mt-0.5 text-sm">{s.notes}</div>
+                    ) : null}
+                  </div>
+                  {me.role === "chief" ? (
+                    <form action={deleteStage}>
+                      <input type="hidden" name="id" value={s.id} />
+                      <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
+                        ×
+                      </button>
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {stages.length > 0 ? (
+            <>
+              <h3 className="mb-2 mt-4 text-sm font-semibold uppercase tracking-wide rc-muted">
+                Recce schedule
+              </h3>
+              {me.role === "chief" ? (
+                <form
+                  action={addRecceEntry}
+                  className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
+                >
+                  <select
+                    name="stage_id"
+                    required
+                    defaultValue=""
+                    className="rc-select sm:col-span-3"
+                  >
+                    <option value="" disabled>
+                      Stage…
+                    </option>
+                    {stages.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        SS{s.stageNumber} — {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    name="day"
+                    type="date"
+                    className="rc-input sm:col-span-2"
+                    title="Day"
+                  />
+                  <input
+                    name="pass_number"
+                    type="number"
+                    min={1}
+                    defaultValue={1}
+                    className="rc-input sm:col-span-1"
+                    title="Pass #"
+                  />
+                  <select
+                    name="driver_user_id"
+                    defaultValue=""
+                    className="rc-select sm:col-span-2"
+                  >
+                    <option value="">Driver…</option>
+                    {crew.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    name="co_driver_user_id"
+                    defaultValue=""
+                    className="rc-select sm:col-span-2"
+                  >
+                    <option value="">Co-driver…</option>
+                    {crew.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="submit" className="rc-btn rc-btn-primary sm:col-span-2">
+                    Add entry
+                  </button>
+                  <input
+                    name="notes"
+                    placeholder="Notes (optional)"
+                    className="rc-input sm:col-span-12"
+                  />
+                </form>
+              ) : null}
+              {recceRows.length === 0 ? (
+                <p className="rc-muted text-sm">No recce passes scheduled.</p>
+              ) : (
+                <ul className="rc-list mb-4">
+                  {recceRows.map((r) => (
+                    <li key={r.id} className="rc-list-row">
+                      <div className="flex-1">
+                        <div className="font-medium">
+                          <span className="rc-muted mr-2 font-mono text-xs">
+                            SS{r.stageNumber}
+                          </span>
+                          {r.stageName}
+                          <span className="rc-muted ml-2 text-xs">
+                            · pass {r.passNumber}
+                          </span>
+                        </div>
+                        <div className="rc-muted mt-0.5 text-sm">
+                          {r.day ?? "—"}
+                          {" · "}
+                          {r.driverName ? `Driver: ${r.driverName}` : "Driver TBD"}
+                          {" · "}
+                          {r.coDriverName
+                            ? `Co: ${r.coDriverName}`
+                            : "Co TBD"}
+                        </div>
+                        {r.notes ? (
+                          <div className="rc-muted mt-1 text-xs">{r.notes}</div>
+                        ) : null}
+                      </div>
+                      {me.role === "chief" ? (
+                        <form action={deleteRecceEntry}>
+                          <input type="hidden" name="id" value={r.id} />
+                          <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
+                            ×
+                          </button>
+                        </form>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          ) : null}
+
+          <h3 className="mb-2 mt-4 text-sm font-semibold uppercase tracking-wide rc-muted">
+            Recce logistics notes
+          </h3>
+          {me.role === "chief" ? (
+            <form action={saveRecceLogistics} className="rc-card flex flex-col gap-2">
+              <textarea
+                name="recce_logistics_notes"
+                defaultValue={event.recceLogisticsNotes ?? ""}
+                rows={4}
+                placeholder="Fuel stops, lunch, transit times between stages…"
+                className="rc-textarea"
+              />
+              <button type="submit" className="rc-btn rc-btn-ghost self-start text-sm">
+                Save logistics
+              </button>
+            </form>
+          ) : (
+            <div className="rc-card whitespace-pre-wrap text-sm">
+              {event.recceLogisticsNotes ?? (
+                <span className="rc-muted">No logistics notes yet.</span>
+              )}
+            </div>
+          )}
         </section>
 
         <section className="mb-10">

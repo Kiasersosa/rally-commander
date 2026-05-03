@@ -101,6 +101,7 @@ export const events = pgTable(
     araRoundNumber: integer("ara_round_number"),
     phase: eventPhaseEnum("phase").notNull().default("planning"),
     debriefNotes: text("debrief_notes"),
+    recceLogisticsNotes: text("recce_logistics_notes"),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -512,6 +513,63 @@ export const mealPlanItems = pgTable(
   }),
 );
 
+// ---------- Phase 5b: recce ----------
+
+export const eventStages = pgTable(
+  "event_stages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    stageNumber: integer("stage_number").notNull(),
+    name: text("name").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventStageUniq: uniqueIndex("event_stages_event_number_uniq").on(
+      t.teamId,
+      t.eventId,
+      t.stageNumber,
+    ),
+  }),
+);
+
+export const recceScheduleEntries = pgTable(
+  "recce_schedule_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    stageId: uuid("stage_id")
+      .notNull()
+      .references(() => eventStages.id, { onDelete: "cascade" }),
+    day: date("day"),
+    passNumber: integer("pass_number").notNull().default(1),
+    driverUserId: uuid("driver_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    coDriverUserId: uuid("co_driver_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventIdx: index("recce_schedule_event_idx").on(t.teamId, t.eventId, t.day),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -604,6 +662,11 @@ export type HotelBooking = typeof hotelBookings.$inferSelect;
 export type NewHotelBooking = typeof hotelBookings.$inferInsert;
 export type MealPlanItem = typeof mealPlanItems.$inferSelect;
 export type NewMealPlanItem = typeof mealPlanItems.$inferInsert;
+
+export type EventStage = typeof eventStages.$inferSelect;
+export type NewEventStage = typeof eventStages.$inferInsert;
+export type RecceScheduleEntry = typeof recceScheduleEntries.$inferSelect;
+export type NewRecceScheduleEntry = typeof recceScheduleEntries.$inferInsert;
 
 // boolean export to silence unused import warnings if added later
 void boolean;
