@@ -57,6 +57,12 @@ export default async function LoginPage({
         <button type="submit" className="rc-btn rc-btn-primary mt-1">
           Send magic link
         </button>
+        <a
+          href="/login/pin"
+          className="rc-link mt-1 text-center text-xs"
+        >
+          Use PIN instead
+        </a>
         <p className="rc-muted mt-1 text-center text-xs">
           Sign in with the email your crew chief invited.
         </p>

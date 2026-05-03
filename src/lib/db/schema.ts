@@ -150,6 +150,12 @@ export const users = pgTable(
     phoneNumber: text("phone_number"),
     /** SMS opt-in (default true). Email digest is mandatory while account active. */
     smsOptIn: boolean("sms_opt_in").notNull().default(true),
+    /** bcrypt-hashed PIN. Optional alternative to magic-link login. */
+    pinHash: text("pin_hash"),
+    /** Consecutive failed PIN attempts. Resets to 0 on successful login. */
+    pinFailedAttempts: integer("pin_failed_attempts").notNull().default(0),
+    /** When set in the future, PIN auth is locked until that time. */
+    pinLockedUntil: timestamp("pin_locked_until", { withTimezone: true }),
     // Auth.js adapter columns (single user record per person):
     emailVerified: timestamp("email_verified", { withTimezone: true, mode: "date" }),
     image: text("image"),
