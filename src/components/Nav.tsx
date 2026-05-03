@@ -24,10 +24,10 @@ export function Nav({ user }: { user: SessionUser }) {
           </Link>
         </div>
         <div className="flex items-center gap-4 text-sm">
-          <span className="rc-muted">
+          <Link href="/profile" className="rc-muted rc-link">
             {user.name}{" "}
             <span className="opacity-60">· {user.role.replace(/_/g, " ")}</span>
-          </span>
+          </Link>
           <form
             action={async () => {
               "use server";

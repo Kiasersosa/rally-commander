@@ -1,0 +1,21 @@
+name: Weekly digest cron
+
+on:
+  schedule:
+    # Mondays at 14:00 UTC = 9am Eastern (during DST). Tweak with timezone needs.
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/digest/run
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          response=$(curl -sS -X POST -w "\nHTTP %{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            https://rally-commander.fly.dev/api/digest/run)
+          echo "$response"
+          echo "$response" | grep -q "HTTP 200" || exit 1

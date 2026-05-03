@@ -71,6 +71,13 @@
       "when": 1777815672982,
       "tag": "0009_naive_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777816549330,
+      "tag": "0010_green_synch",
+      "breakpoints": true
     }
   ]
 }

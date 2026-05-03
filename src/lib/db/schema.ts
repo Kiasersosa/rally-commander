@@ -109,6 +109,24 @@ export const crewStatusEnum = pgEnum("crew_status", [
   "other",
 ]);
 
+export const notificationChannelEnum = pgEnum("notification_channel", [
+  "email",
+  "sms",
+]);
+
+export const notificationKindEnum = pgEnum("notification_kind", [
+  "digest",
+  "expiry_alert",
+  "bulletin",
+  "manual",
+]);
+
+export const notificationStatusEnum = pgEnum("notification_status", [
+  "pending",
+  "sent",
+  "failed",
+]);
+
 // ---------- domain ----------
 
 export const teams = pgTable("teams", {
@@ -128,6 +146,10 @@ export const users = pgTable(
     email: text("email").notNull(),
     name: text("name").notNull(),
     role: userRoleEnum("role").notNull(),
+    /** E.164 phone (e.g., +15551234567). Optional. Used for Twilio SMS. */
+    phoneNumber: text("phone_number"),
+    /** SMS opt-in (default true). Email digest is mandatory while account active. */
+    smsOptIn: boolean("sms_opt_in").notNull().default(true),
     // Auth.js adapter columns (single user record per person):
     emailVerified: timestamp("email_verified", { withTimezone: true, mode: "date" }),
     image: text("image"),
@@ -972,6 +994,34 @@ export const crewStatusEntries = pgTable(
   }),
 );
 
+// ---------- Phase 10: notifications (audit log) ----------
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    channel: notificationChannelEnum("channel").notNull(),
+    kind: notificationKindEnum("kind").notNull(),
+    subject: text("subject"),
+    body: text("body").notNull(),
+    /** Email address or phone number actually used at send time. */
+    recipient: text("recipient").notNull(),
+    status: notificationStatusEnum("status").notNull().default("pending"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamUserIdx: index("notifications_team_user_idx").on(t.teamId, t.userId, t.createdAt),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -1103,6 +1153,12 @@ export type NewServiceStopItem = typeof serviceStopItems.$inferInsert;
 export type CrewStatusEntry = typeof crewStatusEntries.$inferSelect;
 export type NewCrewStatusEntry = typeof crewStatusEntries.$inferInsert;
 export type CrewStatus = (typeof crewStatusEnum.enumValues)[number];
+
+export type Notification = typeof notifications.$inferSelect;
+export type NewNotification = typeof notifications.$inferInsert;
+export type NotificationChannel = (typeof notificationChannelEnum.enumValues)[number];
+export type NotificationKind = (typeof notificationKindEnum.enumValues)[number];
+export type NotificationStatus = (typeof notificationStatusEnum.enumValues)[number];
 
 // boolean export to silence unused import warnings if added later
 void boolean;

@@ -1,0 +1,22 @@
+name: Daily expiry alerts cron
+
+on:
+  schedule:
+    # Daily at 13:00 UTC = 8am Eastern (DST), 9am EST. Catches items entering
+    # the 1-week band early in the day.
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/expiry-alerts/run
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          response=$(curl -sS -X POST -w "\nHTTP %{http_code}" \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            https://rally-commander.fly.dev/api/expiry-alerts/run)
+          echo "$response"
+          echo "$response" | grep -q "HTTP 200" || exit 1
