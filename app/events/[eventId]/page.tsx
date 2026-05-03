@@ -950,6 +950,12 @@ export default async function EventDetailPage({
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              href={`/events/${eventId}/tech-ready`}
+              className="rc-link text-sm"
+            >
+              Tech-ready ↗
+            </Link>
             {readyPct !== null ? (
               <span
                 className={`rc-badge rc-badge-${readyPct === 100 ? "on_event" : readyPct === 0 ? "post_event" : "prep"}`}

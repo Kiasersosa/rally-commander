@@ -16,6 +16,9 @@ export function Nav({ user }: { user: SessionUser }) {
           <Link href="/vehicles" className="rc-link text-sm">
             Vehicles
           </Link>
+          <Link href="/safety" className="rc-link text-sm">
+            Safety
+          </Link>
           <Link href="/team" className="rc-link text-sm">
             Team
           </Link>

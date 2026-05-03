@@ -77,6 +77,29 @@ export const documentCategoryEnum = pgEnum("document_category", [
   "other",
 ]);
 
+export const safetyItemTypeEnum = pgEnum("safety_item_type", [
+  "helmet",
+  "hans",
+  "suit",
+  "harness",
+  "fuel_cell",
+  "fire_extinguisher",
+  "other",
+]);
+
+export const licenseKindEnum = pgEnum("license_kind", [
+  "ara",
+  "fia",
+  "medical",
+]);
+
+export const equipmentCategoryEnum = pgEnum("equipment_category", [
+  "service_tool",
+  "comms",
+  "filming",
+  "other",
+]);
+
 // ---------- domain ----------
 
 export const teams = pgTable("teams", {
@@ -761,6 +784,81 @@ export const documentAcknowledgments = pgTable(
   }),
 );
 
+// ---------- Phase 8: safety, licensing, equipment ----------
+
+export const safetyItems = pgTable(
+  "safety_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    type: safetyItemTypeEnum("type").notNull(),
+    /** FIA / SA / ARA spec or rating, e.g. "FIA 8859-2015". */
+    spec: text("spec"),
+    serial: text("serial"),
+    expiryDate: date("expiry_date"),
+    ownerUserId: uuid("owner_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    notes: text("notes"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamIdx: index("safety_items_team_idx").on(t.teamId),
+  }),
+);
+
+export const licenseDocs = pgTable(
+  "license_docs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    holderUserId: uuid("holder_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: licenseKindEnum("kind").notNull(),
+    licenseNumber: text("license_number"),
+    expiryDate: date("expiry_date"),
+    notes: text("notes"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamIdx: index("license_docs_team_idx").on(t.teamId),
+    holderKindIdx: index("license_docs_holder_kind_idx").on(
+      t.teamId,
+      t.holderUserId,
+      t.kind,
+    ),
+  }),
+);
+
+export const equipmentItems = pgTable(
+  "equipment_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    category: equipmentCategoryEnum("category").notNull(),
+    description: text("description").notNull(),
+    location: text("location"),
+    notes: text("notes"),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    teamIdx: index("equipment_items_team_idx").on(t.teamId),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -872,6 +970,16 @@ export type NewDocumentVersion = typeof documentVersions.$inferInsert;
 export type DocumentAcknowledgment = typeof documentAcknowledgments.$inferSelect;
 export type NewDocumentAcknowledgment = typeof documentAcknowledgments.$inferInsert;
 export type DocumentCategory = (typeof documentCategoryEnum.enumValues)[number];
+
+export type SafetyItem = typeof safetyItems.$inferSelect;
+export type NewSafetyItem = typeof safetyItems.$inferInsert;
+export type LicenseDoc = typeof licenseDocs.$inferSelect;
+export type NewLicenseDoc = typeof licenseDocs.$inferInsert;
+export type EquipmentItem = typeof equipmentItems.$inferSelect;
+export type NewEquipmentItem = typeof equipmentItems.$inferInsert;
+export type SafetyItemType = (typeof safetyItemTypeEnum.enumValues)[number];
+export type LicenseKind = (typeof licenseKindEnum.enumValues)[number];
+export type EquipmentCategory = (typeof equipmentCategoryEnum.enumValues)[number];
 
 // boolean export to silence unused import warnings if added later
 void boolean;

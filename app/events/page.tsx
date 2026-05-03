@@ -11,8 +11,16 @@ import {
   documents,
   events,
   expenseEntries,
+  licenseDocs,
+  safetyItems,
 } from "@/lib/db/schema";
 import { DOCUMENT_CATEGORY_LABEL } from "@/lib/documents";
+import {
+  ATTENTION_BANDS,
+  BAND_BADGE_CLASS,
+  BAND_LABEL,
+  deriveWarnings,
+} from "@/lib/safety-expiry-warner";
 import { getCurrentUser, requireChief } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { instantiateChecklistsForEvent } from "@/lib/checklists";
@@ -93,6 +101,46 @@ export default async function EventsPage() {
     );
   const stalePendingAcks = pendingAcks.filter(
     (p) => p.latestVersionId && p.myAckVersionId !== p.latestVersionId,
+  );
+
+  // Expiry warnings across safety + licenses (team-wide)
+  const safetyForWarnings = await db
+    .select({
+      id: safetyItems.id,
+      type: safetyItems.type,
+      serial: safetyItems.serial,
+      expiryDate: safetyItems.expiryDate,
+    })
+    .from(safetyItems)
+    .where(and(eq(safetyItems.teamId, user.teamId), isNull(safetyItems.deletedAt)));
+  const licensesForWarnings = await db
+    .select({
+      id: licenseDocs.id,
+      kind: licenseDocs.kind,
+      expiryDate: licenseDocs.expiryDate,
+      holderId: licenseDocs.holderUserId,
+    })
+    .from(licenseDocs)
+    .where(and(eq(licenseDocs.teamId, user.teamId), isNull(licenseDocs.deletedAt)));
+
+  const today = new Date();
+  const allExpiryWarnings = deriveWarnings(
+    [
+      ...safetyForWarnings.map((s) => ({
+        id: `safety:${s.id}`,
+        label: `${s.type.replace(/_/g, " ")}${s.serial ? ` · ${s.serial}` : ""}`,
+        expiryDate: s.expiryDate ? new Date(`${s.expiryDate}T00:00:00Z`) : null,
+      })),
+      ...licensesForWarnings.map((l) => ({
+        id: `license:${l.id}`,
+        label: `${l.kind} license`,
+        expiryDate: l.expiryDate ? new Date(`${l.expiryDate}T00:00:00Z`) : null,
+      })),
+    ],
+    today,
+  );
+  const attentionWarnings = allExpiryWarnings.filter((w) =>
+    ATTENTION_BANDS.includes(w.band),
   );
 
   const seasonVariance = reconcile(
@@ -181,6 +229,44 @@ export default async function EventsPage() {
               Create event
             </button>
           </form>
+        ) : null}
+
+        {attentionWarnings.length > 0 ? (
+          <section className="mb-8">
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-base font-semibold uppercase tracking-wide rc-muted">
+                Expiry warnings
+              </h2>
+              <Link href="/safety" className="rc-link text-xs">
+                Manage →
+              </Link>
+            </div>
+            <ul className="rc-list">
+              {attentionWarnings.slice(0, 8).map((w) => (
+                <li key={w.item.id} className="rc-list-row">
+                  <div className="flex-1">
+                    <div className="font-medium">{w.item.label}</div>
+                    <div className="rc-muted text-sm">
+                      {w.item.expiryDate
+                        ? `expires ${w.item.expiryDate.toISOString().slice(0, 10)} · ${w.daysUntilExpiry} days`
+                        : "no expiry"}
+                    </div>
+                  </div>
+                  <span className={`rc-badge ${BAND_BADGE_CLASS[w.band]}`}>
+                    {BAND_LABEL[w.band]}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {attentionWarnings.length > 8 ? (
+              <p className="rc-muted mt-2 text-xs">
+                + {attentionWarnings.length - 8} more on{" "}
+                <Link href="/safety" className="rc-link">
+                  /safety
+                </Link>
+              </p>
+            ) : null}
+          </section>
         ) : null}
 
         {stalePendingAcks.length > 0 ? (
