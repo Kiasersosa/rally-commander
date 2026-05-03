@@ -3,11 +3,13 @@ import { revalidatePath } from "next/cache";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
+  budgetLines,
   checklistInstanceItems,
   checklistInstances,
   checklistSignoffs,
   eventStages,
   events,
+  expenseEntries,
   hotelBookings,
   itineraryLegAssignees,
   itineraryLegs,
@@ -19,8 +21,15 @@ import {
   users,
   vehicles,
   workOrders,
+  type BudgetCategory,
   type OrderListStatus,
 } from "@/lib/db/schema";
+import {
+  ALL_BUDGET_CATEGORIES,
+  BUDGET_CATEGORY_LABEL,
+  formatCents,
+  reconcile,
+} from "@/lib/budget-reconciler";
 import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
 import { advance } from "@/lib/event-lifecycle";
 import { Nav } from "@/components/Nav";
@@ -200,6 +209,48 @@ export default async function EventDetailPage({
       ),
     )
     .orderBy(asc(mealPlanItems.whenAt), asc(mealPlanItems.createdAt));
+
+  // Budget lines + expenses for this event
+  const budgetRows = await db
+    .select()
+    .from(budgetLines)
+    .where(
+      and(
+        eq(budgetLines.teamId, me.teamId),
+        eq(budgetLines.eventId, eventId),
+      ),
+    )
+    .orderBy(asc(budgetLines.category));
+  const expenseRows = await db
+    .select({
+      id: expenseEntries.id,
+      category: expenseEntries.category,
+      amountCents: expenseEntries.amountCents,
+      vendor: expenseEntries.vendor,
+      expenseDate: expenseEntries.expenseDate,
+      notes: expenseEntries.notes,
+      enteredByName: users.name,
+    })
+    .from(expenseEntries)
+    .innerJoin(users, eq(users.id, expenseEntries.enteredByUserId))
+    .where(
+      and(
+        eq(expenseEntries.teamId, me.teamId),
+        eq(expenseEntries.eventId, eventId),
+      ),
+    )
+    .orderBy(asc(expenseEntries.expenseDate), asc(expenseEntries.createdAt));
+
+  const variance = reconcile(
+    budgetRows.map((b) => ({
+      category: b.category,
+      estimatedCents: b.estimatedCents,
+    })),
+    expenseRows.map((e) => ({
+      category: e.category,
+      amountCents: e.amountCents,
+    })),
+  );
 
   // Stages and recce schedule
   const stages = await db
@@ -681,6 +732,99 @@ export default async function EventDetailPage({
     revalidatePath(`/events/${eventId}`);
   }
 
+  // ---- Budget actions ----
+
+  function dollarsToCents(s: string): number {
+    const n = Number.parseFloat(s);
+    if (!Number.isFinite(n)) return 0;
+    return Math.round(n * 100);
+  }
+
+  async function upsertBudgetLine(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const category = String(formData.get("category") ?? "") as BudgetCategory;
+    if (!ALL_BUDGET_CATEGORIES.includes(category)) return;
+    const dollars = String(formData.get("amount") ?? "0");
+    const estimatedCents = dollarsToCents(dollars);
+    const notes = String(formData.get("notes") ?? "").trim() || null;
+
+    // Upsert: one line per (team, event, category)
+    const [existing] = await db
+      .select({ id: budgetLines.id })
+      .from(budgetLines)
+      .where(
+        and(
+          eq(budgetLines.teamId, u.teamId),
+          eq(budgetLines.eventId, eventId),
+          eq(budgetLines.category, category),
+        ),
+      )
+      .limit(1);
+    if (existing) {
+      await db
+        .update(budgetLines)
+        .set({ estimatedCents, notes, updatedAt: new Date() })
+        .where(eq(budgetLines.id, existing.id));
+    } else {
+      await db.insert(budgetLines).values({
+        teamId: u.teamId,
+        eventId,
+        category,
+        estimatedCents,
+        notes,
+      });
+    }
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteBudgetLine(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    await db
+      .delete(budgetLines)
+      .where(and(eq(budgetLines.id, id), eq(budgetLines.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function addExpense(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const category = String(formData.get("category") ?? "") as BudgetCategory;
+    if (!ALL_BUDGET_CATEGORIES.includes(category)) return;
+    const dollars = String(formData.get("amount") ?? "0");
+    const amountCents = dollarsToCents(dollars);
+    if (amountCents <= 0) return;
+    const vendor = String(formData.get("vendor") ?? "").trim() || null;
+    const dateRaw = String(formData.get("expense_date") ?? "").trim();
+    const notes = String(formData.get("notes") ?? "").trim() || null;
+    await db.insert(expenseEntries).values({
+      teamId: u.teamId,
+      eventId,
+      category,
+      amountCents,
+      vendor,
+      expenseDate: dateRaw || null,
+      notes,
+      enteredByUserId: u.userId,
+    });
+    revalidatePath(`/events/${eventId}`);
+  }
+
+  async function deleteExpense(formData: FormData) {
+    "use server";
+    const u = await requireSession();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return;
+    // Anyone on the team can delete (lightweight; chief is the policy owner)
+    await db
+      .delete(expenseEntries)
+      .where(and(eq(expenseEntries.id, id), eq(expenseEntries.teamId, u.teamId)));
+    revalidatePath(`/events/${eventId}`);
+  }
+
   async function rebuildChecklists() {
     "use server";
     const u = await requireChief();
@@ -947,6 +1091,208 @@ export default async function EventDetailPage({
               </ul>
             );
           })()}
+        </section>
+
+        <section className="mb-10">
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold tracking-tight">Budget</h2>
+            <div className="text-sm">
+              <span className="rc-muted">Est </span>
+              <span className="font-medium">
+                {formatCents(variance.totalEstimatedCents)}
+              </span>
+              <span className="rc-muted"> · Actual </span>
+              <span className="font-medium">
+                {formatCents(variance.totalActualCents)}
+              </span>
+              <span className="rc-muted"> · Variance </span>
+              <span
+                className={
+                  variance.totalVarianceCents < 0
+                    ? "font-semibold text-rose-600 dark:text-rose-400"
+                    : "font-semibold text-emerald-600 dark:text-emerald-400"
+                }
+              >
+                {formatCents(variance.totalVarianceCents)}
+              </span>
+            </div>
+          </div>
+
+          {me.role === "chief" ? (
+            <form
+              action={upsertBudgetLine}
+              className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
+            >
+              <select
+                name="category"
+                required
+                defaultValue=""
+                className="rc-select sm:col-span-3"
+              >
+                <option value="" disabled>
+                  Category…
+                </option>
+                {ALL_BUDGET_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {BUDGET_CATEGORY_LABEL[c]}
+                  </option>
+                ))}
+              </select>
+              <input
+                name="amount"
+                type="number"
+                min={0}
+                step="0.01"
+                required
+                placeholder="Estimated $ (e.g., 350.00)"
+                className="rc-input sm:col-span-3"
+              />
+              <input
+                name="notes"
+                placeholder="Notes (optional)"
+                className="rc-input sm:col-span-4"
+              />
+              <button type="submit" className="rc-btn rc-btn-primary sm:col-span-2">
+                Set budget
+              </button>
+            </form>
+          ) : null}
+
+          {variance.byCategory.length === 0 ? (
+            <p className="rc-muted mb-4 text-sm">
+              No budget set and no expenses yet.
+            </p>
+          ) : (
+            <ul className="rc-list mb-4">
+              {variance.byCategory.map((c) => {
+                const matchingLine = budgetRows.find(
+                  (b) => b.category === c.category,
+                );
+                return (
+                  <li key={c.category} className="rc-list-row">
+                    <div className="flex-1">
+                      <div className="font-medium">
+                        {BUDGET_CATEGORY_LABEL[c.category]}
+                      </div>
+                      <div className="rc-muted text-sm">
+                        Est {formatCents(c.estimatedCents)} · Actual{" "}
+                        {formatCents(c.actualCents)}
+                      </div>
+                    </div>
+                    <span
+                      className={`rc-badge rc-badge-${
+                        c.status === "over"
+                          ? "post_event"
+                          : c.status === "no_budget"
+                          ? "post_event"
+                          : c.status === "no_actuals"
+                          ? "planning"
+                          : c.status === "on_budget"
+                          ? "prep"
+                          : "on_event"
+                      }`}
+                      title={c.status}
+                    >
+                      {formatCents(c.varianceCents)}
+                    </span>
+                    {me.role === "chief" && matchingLine ? (
+                      <form action={deleteBudgetLine}>
+                        <input type="hidden" name="id" value={matchingLine.id} />
+                        <button
+                          type="submit"
+                          className="rc-btn rc-btn-danger px-2 py-1 text-xs"
+                          title="Remove this budget line"
+                        >
+                          ×
+                        </button>
+                      </form>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <h3 className="mb-2 mt-4 text-sm font-semibold uppercase tracking-wide rc-muted">
+            Log an expense
+          </h3>
+          <form
+            action={addExpense}
+            className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
+          >
+            <select
+              name="category"
+              required
+              defaultValue=""
+              className="rc-select sm:col-span-2"
+            >
+              <option value="" disabled>
+                Category…
+              </option>
+              {ALL_BUDGET_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {BUDGET_CATEGORY_LABEL[c]}
+                </option>
+              ))}
+            </select>
+            <input
+              name="amount"
+              type="number"
+              min={0}
+              step="0.01"
+              required
+              placeholder="$ amount"
+              className="rc-input sm:col-span-2"
+            />
+            <input
+              name="vendor"
+              placeholder="Vendor"
+              className="rc-input sm:col-span-3"
+            />
+            <input
+              name="expense_date"
+              type="date"
+              className="rc-input sm:col-span-2"
+            />
+            <input
+              name="notes"
+              placeholder="Notes"
+              className="rc-input sm:col-span-2"
+            />
+            <button type="submit" className="rc-btn rc-btn-primary sm:col-span-1">
+              Log
+            </button>
+          </form>
+
+          {expenseRows.length === 0 ? (
+            <p className="rc-muted text-sm">No expenses logged yet.</p>
+          ) : (
+            <ul className="rc-list">
+              {expenseRows.map((e) => (
+                <li key={e.id} className="rc-list-row">
+                  <div className="flex-1">
+                    <div className="font-medium">
+                      {formatCents(e.amountCents)} ·{" "}
+                      {BUDGET_CATEGORY_LABEL[e.category]}
+                      {e.vendor ? (
+                        <span className="rc-muted text-sm"> · {e.vendor}</span>
+                      ) : null}
+                    </div>
+                    <div className="rc-muted text-xs">
+                      {e.expenseDate ?? "—"} · entered by {e.enteredByName}
+                      {e.notes ? ` · ${e.notes}` : ""}
+                    </div>
+                  </div>
+                  <form action={deleteExpense}>
+                    <input type="hidden" name="id" value={e.id} />
+                    <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
+                      ×
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="mb-10">

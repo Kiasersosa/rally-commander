@@ -2,11 +2,18 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { and, desc, eq, isNull } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { events } from "@/lib/db/schema";
+import { budgetLines, events, expenseEntries } from "@/lib/db/schema";
 import { getCurrentUser, requireChief } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { instantiateChecklistsForEvent } from "@/lib/checklists";
+import {
+  ALL_BUDGET_CATEGORIES,
+  BUDGET_CATEGORY_LABEL,
+  formatCents,
+  reconcile,
+} from "@/lib/budget-reconciler";
 
 export default async function EventsPage() {
   const user = await getCurrentUser();
@@ -17,6 +24,53 @@ export default async function EventsPage() {
     .from(events)
     .where(and(eq(events.teamId, user.teamId), isNull(events.deletedAt)))
     .orderBy(desc(events.eventDate));
+
+  // Season rollup for the current year — aggregates budgets + expenses across
+  // all events whose event_date is in YYYY-01-01..YYYY-12-31.
+  const currentYear = new Date().getUTCFullYear();
+  const yearStart = `${currentYear}-01-01`;
+  const yearEnd = `${currentYear}-12-31`;
+
+  const seasonBudgets = await db
+    .select({
+      category: budgetLines.category,
+      total: sql<number>`COALESCE(SUM(${budgetLines.estimatedCents}), 0)::int`,
+    })
+    .from(budgetLines)
+    .innerJoin(events, eq(events.id, budgetLines.eventId))
+    .where(
+      and(
+        eq(budgetLines.teamId, user.teamId),
+        sql`${events.eventDate} BETWEEN ${yearStart} AND ${yearEnd}`,
+      ),
+    )
+    .groupBy(budgetLines.category);
+
+  const seasonExpenses = await db
+    .select({
+      category: expenseEntries.category,
+      total: sql<number>`COALESCE(SUM(${expenseEntries.amountCents}), 0)::int`,
+    })
+    .from(expenseEntries)
+    .innerJoin(events, eq(events.id, expenseEntries.eventId))
+    .where(
+      and(
+        eq(expenseEntries.teamId, user.teamId),
+        sql`${events.eventDate} BETWEEN ${yearStart} AND ${yearEnd}`,
+      ),
+    )
+    .groupBy(expenseEntries.category);
+
+  const seasonVariance = reconcile(
+    seasonBudgets.map((r) => ({
+      category: r.category,
+      estimatedCents: Number(r.total),
+    })),
+    seasonExpenses.map((r) => ({
+      category: r.category,
+      amountCents: Number(r.total),
+    })),
+  );
 
   async function createEvent(formData: FormData) {
     "use server";
@@ -93,6 +147,69 @@ export default async function EventsPage() {
               Create event
             </button>
           </form>
+        ) : null}
+
+        {seasonVariance.byCategory.length > 0 ? (
+          <section className="mb-8">
+            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-base font-semibold uppercase tracking-wide rc-muted">
+                {currentYear} season spend by category
+              </h2>
+              <div className="text-sm">
+                <span className="rc-muted">Est </span>
+                <span className="font-medium">
+                  {formatCents(seasonVariance.totalEstimatedCents)}
+                </span>
+                <span className="rc-muted"> · Actual </span>
+                <span className="font-medium">
+                  {formatCents(seasonVariance.totalActualCents)}
+                </span>
+                <span className="rc-muted"> · Var </span>
+                <span
+                  className={
+                    seasonVariance.totalVarianceCents < 0
+                      ? "font-semibold text-rose-600 dark:text-rose-400"
+                      : "font-semibold text-emerald-600 dark:text-emerald-400"
+                  }
+                >
+                  {formatCents(seasonVariance.totalVarianceCents)}
+                </span>
+              </div>
+            </div>
+            <ul className="rc-list">
+              {ALL_BUDGET_CATEGORIES.filter((cat) =>
+                seasonVariance.byCategory.some((c) => c.category === cat),
+              ).map((cat) => {
+                const c = seasonVariance.byCategory.find((x) => x.category === cat)!;
+                return (
+                  <li key={cat} className="rc-list-row">
+                    <div className="flex-1">
+                      <div className="font-medium">
+                        {BUDGET_CATEGORY_LABEL[cat]}
+                      </div>
+                      <div className="rc-muted text-sm">
+                        Est {formatCents(c.estimatedCents)} · Actual{" "}
+                        {formatCents(c.actualCents)}
+                      </div>
+                    </div>
+                    <span
+                      className={`rc-badge rc-badge-${
+                        c.status === "over" || c.status === "no_budget"
+                          ? "post_event"
+                          : c.status === "no_actuals"
+                          ? "planning"
+                          : c.status === "on_budget"
+                          ? "prep"
+                          : "on_event"
+                      }`}
+                    >
+                      {formatCents(c.varianceCents)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
         ) : null}
 
         {rows.length === 0 ? (

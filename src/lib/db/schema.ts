@@ -56,6 +56,16 @@ export const orderListStatusEnum = pgEnum("order_list_status", [
   "packed",
 ]);
 
+export const budgetCategoryEnum = pgEnum("budget_category", [
+  "entry",
+  "fuel",
+  "parts",
+  "hotels",
+  "food",
+  "transport",
+  "other",
+]);
+
 // ---------- domain ----------
 
 export const teams = pgTable("teams", {
@@ -570,6 +580,67 @@ export const recceScheduleEntries = pgTable(
   }),
 );
 
+// ---------- Phase 6: budget ----------
+//
+// Amounts stored as integer cents to avoid float drift. UI converts to/from
+// dollars at the boundary.
+
+export const budgetLines = pgTable(
+  "budget_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    category: budgetCategoryEnum("category").notNull(),
+    estimatedCents: integer("estimated_cents").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventCatUniq: uniqueIndex("budget_lines_event_cat_uniq").on(
+      t.teamId,
+      t.eventId,
+      t.category,
+    ),
+  }),
+);
+
+export const expenseEntries = pgTable(
+  "expense_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    category: budgetCategoryEnum("category").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    vendor: text("vendor"),
+    expenseDate: date("expense_date"),
+    notes: text("notes"),
+    enteredByUserId: uuid("entered_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventCatIdx: index("expense_entries_event_cat_idx").on(
+      t.teamId,
+      t.eventId,
+      t.category,
+    ),
+    teamCatIdx: index("expense_entries_team_cat_idx").on(t.teamId, t.category),
+  }),
+);
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
@@ -667,6 +738,12 @@ export type EventStage = typeof eventStages.$inferSelect;
 export type NewEventStage = typeof eventStages.$inferInsert;
 export type RecceScheduleEntry = typeof recceScheduleEntries.$inferSelect;
 export type NewRecceScheduleEntry = typeof recceScheduleEntries.$inferInsert;
+
+export type BudgetLine = typeof budgetLines.$inferSelect;
+export type NewBudgetLine = typeof budgetLines.$inferInsert;
+export type ExpenseEntry = typeof expenseEntries.$inferSelect;
+export type NewExpenseEntry = typeof expenseEntries.$inferInsert;
+export type BudgetCategory = (typeof budgetCategoryEnum.enumValues)[number];
 
 // boolean export to silence unused import warnings if added later
 void boolean;
