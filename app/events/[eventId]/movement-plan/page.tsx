@@ -323,7 +323,7 @@ export default async function MovementPlanPage({
                         >
                           Rename
                         </Link>
-                        <form action={deleteDayAction} onSubmit={(e) => { if (!confirm(`Delete "${day.label}" and all its entries?`)) e.preventDefault(); }}>
+                        <form action={deleteDayAction}>
                           <button type="submit" className="rc-btn rc-btn-danger text-xs">Delete day</button>
                         </form>
                       </div>
