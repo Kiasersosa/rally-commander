@@ -27,8 +27,8 @@
   --steel: #7c2d12;
   --steel-soft: #a8a29e;          /* warm muted */
 
-  /* Background image overlay — warm cream tint */
-  --bg-image-tint: rgba(247, 243, 237, 0.80);
+  /* Background image overlay — warm cream tint, dialed for photo to bleed through */
+  --bg-image-tint: rgba(247, 243, 237, 0.62);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -52,50 +52,42 @@
     --steel: #fed7aa;             /* orange-200 for soft secondary text */
     --steel-soft: #d6d3d1;
 
-    --bg-image-tint: rgba(28, 25, 23, 0.82);
+    --bg-image-tint: rgba(28, 25, 23, 0.62);
   }
 }
 
-html,
-body {
-  background: var(--background);
+/* ---------- Site-wide background image + tint ----------
+   The bg lives on `html` itself — single layered background = (tint
+   gradient) over (the photo) over (the fallback color). `body` is
+   transparent so html shows through. Page content scrolls; the photo
+   stays fixed via background-attachment.
+*/
+
+html {
   color: var(--foreground);
+  background-color: var(--background);
+  background-image:
+    linear-gradient(var(--bg-image-tint), var(--bg-image-tint)),
+    url("/bg.jpg");
+  background-size: cover, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  background-attachment: fixed, fixed;
 }
 
 body {
+  background: transparent;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", sans-serif;
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
-  position: relative;
 }
 
-/* ---------- Site-wide subtle background image ----------
-   Image: /public/bg.jpg (your #899 at LSPR).
-   Rendered fixed behind everything with a warm tint over it so the
-   autumn foliage bleeds through but text stays legible. */
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -2;
-  background-color: var(--background);
-  background-image: url("/bg.jpg");
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  pointer-events: none;
-}
-
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background: var(--bg-image-tint);
-  pointer-events: none;
+/* Live mode reverts to a flat white background — this overrides the
+   inherited transparent body so the photo stops bleeding through. */
+.rc-live {
+  isolation: isolate;
 }
 
 /* ---------- Semantic utility classes ---------- */
@@ -333,8 +325,7 @@ body::after {
 }
 
 /* ---------- Live mode (mobile-first, sun-readable, large tap targets) ----
-   Live mode keeps its own high-contrast palette regardless of theme.
-   Body bg image is hidden on live pages — readability beats flair. */
+   Live mode keeps its own high-contrast palette regardless of theme. */
 
 .rc-live {
   background: #ffffff;
@@ -344,11 +335,14 @@ body::after {
   line-height: 1.4;
   position: relative;
   z-index: 1;
+  isolation: isolate;
 }
 
-body:has(.rc-live)::before,
-body:has(.rc-live)::after {
-  display: none;
+/* When live mode is active, override html's photo bg with a flat color
+   so the high-contrast page never has competing visuals behind it. */
+html:has(.rc-live) {
+  background-image: none;
+  background-color: #ffffff;
 }
 
 .rc-live header,
