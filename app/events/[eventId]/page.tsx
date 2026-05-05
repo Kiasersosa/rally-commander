@@ -962,6 +962,12 @@ export default async function EventDetailPage({
               </Link>
             ) : null}
             <Link
+              href={`/events/${eventId}/supp-regs`}
+              className="rc-link text-sm"
+            >
+              Supp Regs ↗
+            </Link>
+            <Link
               href={`/events/${eventId}/movement-plan`}
               className="rc-link text-sm"
             >

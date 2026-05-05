@@ -14,6 +14,7 @@ import {
   GetObjectCommand,
   PutObjectCommand,
   S3Client,
+  type GetObjectCommandInput,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -91,16 +92,21 @@ export async function putObject(args: StoreObjectArgs): Promise<{ key: string }>
 /**
  * Returns a presigned URL valid for `expiresInSeconds` seconds. We don't make
  * the bucket public — every download flows through a short-lived signed URL.
+ *
+ * Pass `inline: true` to set ResponseContentDisposition to "inline" so the
+ * browser renders the file (e.g. PDF) instead of downloading it.
  */
 export async function getSignedDownloadUrl(
   storageKey: string,
   expiresInSeconds = 60 * 5,
+  options: { inline?: boolean; contentType?: string } = {},
 ): Promise<string> {
-  return getSignedUrl(
-    client(),
-    new GetObjectCommand({ Bucket: bucket(), Key: storageKey }),
-    { expiresIn: expiresInSeconds },
-  );
+  const params: GetObjectCommandInput = { Bucket: bucket(), Key: storageKey };
+  if (options.inline) params.ResponseContentDisposition = "inline";
+  if (options.contentType) params.ResponseContentType = options.contentType;
+  return getSignedUrl(client(), new GetObjectCommand(params), {
+    expiresIn: expiresInSeconds,
+  });
 }
 
 /**
