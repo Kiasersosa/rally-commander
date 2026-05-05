@@ -1,28 +1,58 @@
 @import "tailwindcss";
 
+/* ---------- Warm earthy palette (complements the autumn rally photo) ---------- */
+
 :root {
-  --background: #ffffff;
-  --surface: #fafafa;
-  --foreground: #111827;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #f97316; /* orange-500 — rally accent */
+  /* Surfaces */
+  --background: #f7f3ed;          /* warm cream — never pure white */
+  --surface: #ffffff;
+  --surface-translucent: rgba(255, 253, 248, 0.82);
+  --surface-elevated: #ffffff;
+
+  /* Text */
+  --foreground: #1c1917;          /* stone-900 — warm near-black */
+  --muted: #78716c;               /* stone-500 */
+
+  /* Lines */
+  --border: #e7e5e4;              /* stone-200 */
+  --border-strong: #d6d3d1;       /* stone-300 */
+
+  /* Brand accent — rally orange tied to the autumn foliage */
+  --accent: #ea580c;              /* orange-600, slightly deeper */
   --accent-fg: #ffffff;
-  --accent-hover: #ea580c;
+  --accent-hover: #c2410c;        /* orange-700 */
   --ring: #fb923c;
+
+  /* Secondary — rust / wood brown for icons + subtle accents */
+  --steel: #7c2d12;
+  --steel-soft: #a8a29e;          /* warm muted */
+
+  /* Background image overlay — warm cream tint */
+  --bg-image-tint: rgba(247, 243, 237, 0.80);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #09090b;
-    --surface: #18181b;
-    --foreground: #fafafa;
-    --muted: #a1a1aa;
-    --border: #27272a;
-    --accent: #f97316;
-    --accent-fg: #ffffff;
-    --accent-hover: #fb923c;
-    --ring: #fb923c;
+    --background: #1c1917;        /* stone-900, warm dark */
+    --surface: #292524;            /* stone-800 */
+    --surface-translucent: rgba(41, 37, 36, 0.82);
+    --surface-elevated: #34302d;
+
+    --foreground: #fafaf9;        /* stone-50 */
+    --muted: #a8a29e;             /* stone-400 */
+
+    --border: #44403c;            /* stone-700 */
+    --border-strong: #57534e;     /* stone-600 */
+
+    --accent: #fb923c;            /* orange-400 — bright on warm dark */
+    --accent-fg: #1c1917;
+    --accent-hover: #f97316;
+    --ring: #f97316;
+
+    --steel: #fed7aa;             /* orange-200 for soft secondary text */
+    --steel-soft: #d6d3d1;
+
+    --bg-image-tint: rgba(28, 25, 23, 0.82);
   }
 }
 
@@ -37,27 +67,67 @@ body {
     "Helvetica Neue", sans-serif;
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  position: relative;
 }
 
-/* ---- semantic utility classes used in pages ---- */
+/* ---------- Site-wide subtle background image ----------
+   Image: /public/bg.jpg (your #899 at LSPR).
+   Rendered fixed behind everything with a warm tint over it so the
+   autumn foliage bleeds through but text stays legible. */
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-color: var(--background);
+  background-image: url("/bg.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: var(--bg-image-tint);
+  pointer-events: none;
+}
+
+/* ---------- Semantic utility classes ---------- */
 
 .rc-surface {
-  background: var(--surface);
+  background: var(--surface-translucent);
   border: 1px solid var(--border);
   border-radius: 0.625rem;
+  backdrop-filter: blur(6px);
 }
 
 .rc-card {
-  background: var(--surface);
+  background: var(--surface-translucent);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   padding: 1rem 1.25rem;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.05),
+              0 0 0 1px rgba(168, 162, 158, 0.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  .rc-card {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4),
+                0 0 0 1px rgba(168, 162, 158, 0.06);
+  }
 }
 
 .rc-input,
 .rc-select,
 .rc-textarea {
-  background: var(--background);
+  background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);
   border-radius: 0.5rem;
@@ -86,12 +156,17 @@ body {
   font-size: 0.95rem;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.06s;
+}
+
+.rc-btn:active {
+  transform: translateY(1px);
 }
 
 .rc-btn-primary {
   background: var(--accent);
   color: var(--accent-fg);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--accent) 50%, black);
 }
 
 .rc-btn-primary:hover {
@@ -99,23 +174,32 @@ body {
 }
 
 .rc-btn-ghost {
-  background: transparent;
+  background: var(--surface-translucent);
   color: var(--foreground);
   border-color: var(--border);
+  backdrop-filter: blur(6px);
 }
 
 .rc-btn-ghost:hover {
-  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  background: color-mix(in oklab, var(--foreground) 6%, var(--surface));
+  border-color: var(--border-strong);
 }
 
 .rc-btn-danger {
   background: transparent;
-  color: #ef4444;
-  border-color: color-mix(in oklab, #ef4444 35%, transparent);
+  color: #b91c1c;
+  border-color: color-mix(in oklab, #b91c1c 35%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  .rc-btn-danger {
+    color: #fca5a5;
+    border-color: color-mix(in oklab, #fca5a5 35%, transparent);
+  }
 }
 
 .rc-btn-danger:hover {
-  background: color-mix(in oklab, #ef4444 12%, transparent);
+  background: color-mix(in oklab, #b91c1c 12%, transparent);
 }
 
 .rc-link {
@@ -132,7 +216,8 @@ body {
   color: var(--muted);
 }
 
-/* phase badges */
+/* ---------- Phase / status badges ---------- */
+
 .rc-badge {
   display: inline-flex;
   align-items: center;
@@ -144,6 +229,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   border: 1px solid transparent;
+  background: color-mix(in oklab, var(--surface) 80%, transparent);
 }
 
 .rc-badge::before {
@@ -155,40 +241,41 @@ body {
 }
 
 .rc-badge-planning {
-  background: color-mix(in oklab, #38bdf8 14%, transparent);
-  color: #0ea5e9;
-  border-color: color-mix(in oklab, #38bdf8 30%, transparent);
+  background: color-mix(in oklab, #38bdf8 16%, var(--surface));
+  color: #0369a1;
+  border-color: color-mix(in oklab, #38bdf8 32%, transparent);
 }
 
 .rc-badge-prep {
-  background: color-mix(in oklab, #f59e0b 14%, transparent);
-  color: #d97706;
+  background: color-mix(in oklab, #f59e0b 16%, var(--surface));
+  color: #b45309;
   border-color: color-mix(in oklab, #f59e0b 32%, transparent);
 }
 
 .rc-badge-on_event {
-  background: color-mix(in oklab, #10b981 14%, transparent);
-  color: #059669;
+  background: color-mix(in oklab, #10b981 16%, var(--surface));
+  color: #047857;
   border-color: color-mix(in oklab, #10b981 32%, transparent);
 }
 
 .rc-badge-post_event {
-  background: color-mix(in oklab, #71717a 14%, transparent);
-  color: #71717a;
-  border-color: color-mix(in oklab, #71717a 30%, transparent);
+  background: color-mix(in oklab, #78716c 16%, var(--surface));
+  color: #57534e;
+  border-color: color-mix(in oklab, #78716c 32%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
-  .rc-badge-planning { color: #7dd3fc; }
-  .rc-badge-prep { color: #fcd34d; }
-  .rc-badge-on_event { color: #6ee7b7; }
-  .rc-badge-post_event { color: #d4d4d8; }
+  .rc-badge-planning  { color: #7dd3fc; border-color: color-mix(in oklab, #7dd3fc 35%, transparent); }
+  .rc-badge-prep      { color: #fcd34d; border-color: color-mix(in oklab, #fcd34d 35%, transparent); }
+  .rc-badge-on_event  { color: #6ee7b7; border-color: color-mix(in oklab, #6ee7b7 35%, transparent); }
+  .rc-badge-post_event{ color: #d6d3d1; border-color: color-mix(in oklab, #d6d3d1 35%, transparent); }
 }
 
-/* nav */
+/* ---------- Nav ---------- */
+
 .rc-nav {
-  background: color-mix(in oklab, var(--surface) 92%, transparent);
-  backdrop-filter: blur(10px);
+  background: color-mix(in oklab, var(--surface) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
   border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
@@ -198,27 +285,34 @@ body {
 .rc-logo {
   font-weight: 700;
   letter-spacing: -0.01em;
-  background: linear-gradient(180deg, var(--foreground), color-mix(in oklab, var(--foreground) 60%, var(--accent) 40%));
+  background: linear-gradient(
+    180deg,
+    var(--foreground),
+    color-mix(in oklab, var(--foreground) 50%, var(--accent) 50%)
+  );
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
-/* dashed empty modules placeholder */
+/* ---------- Empty / list / row ---------- */
+
 .rc-empty-section {
   border: 1px dashed var(--border);
   border-radius: 0.75rem;
   padding: 1.25rem;
   color: var(--muted);
   font-size: 0.9rem;
-  background: color-mix(in oklab, var(--surface) 50%, transparent);
+  background: color-mix(in oklab, var(--surface-translucent) 60%, transparent);
+  backdrop-filter: blur(6px);
 }
 
 .rc-list {
-  background: var(--surface);
+  background: var(--surface-translucent);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
   overflow: hidden;
+  backdrop-filter: blur(8px);
 }
 
 .rc-list > * + * {
@@ -238,15 +332,23 @@ body {
   background: color-mix(in oklab, var(--foreground) 4%, transparent);
 }
 
-/* ---- Live mode (mobile-first, sun-readable, large tap targets) ---- */
+/* ---------- Live mode (mobile-first, sun-readable, large tap targets) ----
+   Live mode keeps its own high-contrast palette regardless of theme.
+   Body bg image is hidden on live pages — readability beats flair. */
 
 .rc-live {
-  /* Force high-contrast even in dark mode — service park sun readability */
   background: #ffffff;
   color: #000000;
   min-height: 100vh;
   font-size: 17px;
   line-height: 1.4;
+  position: relative;
+  z-index: 1;
+}
+
+body:has(.rc-live)::before,
+body:has(.rc-live)::after {
+  display: none;
 }
 
 .rc-live header,
@@ -264,6 +366,8 @@ body {
   border: 2px solid #000;
   border-radius: 0.75rem;
   padding: 1rem;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 
 .rc-live .rc-input,
@@ -300,6 +404,12 @@ body {
   background: #fff;
   color: #000;
   border-color: #000;
+  backdrop-filter: none;
+}
+
+.rc-live .rc-list {
+  background: #fafafa;
+  backdrop-filter: none;
 }
 
 .rc-live .rc-list-row {
