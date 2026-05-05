@@ -1028,6 +1028,66 @@ export const notifications = pgTable(
   }),
 );
 
+// ---------- Movement plan ----------
+//
+// A movement plan is a per-event, per-day table of crew movements modelled
+// after the LSPR-style doc: who is doing what, where, when, with travel time
+// and notes. Days are ordered sections; entries are ordered rows within a day.
+
+export const movementPlanDays = pgTable(
+  "movement_plan_days",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    orderIndex: integer("order_index").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventIdx: index("movement_plan_days_event_idx").on(t.teamId, t.eventId, t.orderIndex),
+  }),
+);
+
+export const movementPlanEntries = pgTable(
+  "movement_plan_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    dayId: uuid("day_id")
+      .notNull()
+      .references(() => movementPlanDays.id, { onDelete: "cascade" }),
+    orderIndex: integer("order_index").notNull(),
+    who: text("who").notNull().default(""),
+    what: text("what").notNull(),
+    whereLabel: text("where_label"),
+    whereUrl: text("where_url"),
+    whenTime: text("when_time"),
+    travelTime: text("travel_time"),
+    comments: text("comments"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    dayIdx: index("movement_plan_entries_day_idx").on(t.teamId, t.dayId, t.orderIndex),
+  }),
+);
+
+export type MovementPlanDay = typeof movementPlanDays.$inferSelect;
+export type NewMovementPlanDay = typeof movementPlanDays.$inferInsert;
+export type MovementPlanEntry = typeof movementPlanEntries.$inferSelect;
+export type NewMovementPlanEntry = typeof movementPlanEntries.$inferInsert;
+
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id
 // lives only on the domain `users` table above (Auth.js manages a 1:1 row per user).
