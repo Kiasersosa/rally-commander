@@ -5,6 +5,7 @@ import { and, asc, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   vehicles,
+  vehiclePartsRefs,
   workOrders,
   users,
   events,
@@ -19,6 +20,7 @@ import { ALL_KINDS, KIND_LABEL } from "@/lib/checklists";
 import { sql } from "drizzle-orm";
 
 type Params = Promise<{ vehicleId: string }>;
+type SearchParams = Promise<{ edit?: string }>;
 
 const TYPE_LABEL: Record<VehicleType, string> = {
   rally_car: "Rally car",
@@ -28,12 +30,15 @@ const TYPE_LABEL: Record<VehicleType, string> = {
 
 export default async function VehicleDetailPage({
   params,
+  searchParams,
 }: {
   params: Params;
+  searchParams: SearchParams;
 }) {
   const me = await getCurrentUser();
   if (!me) redirect("/login");
   const { vehicleId } = await params;
+  const { edit: editId } = await searchParams;
 
   const [vehicle] = await db
     .select()
@@ -119,6 +124,17 @@ export default async function VehicleDetailPage({
     )
     .orderBy(desc(workOrders.closedAt));
 
+  const partsRefs = await db
+    .select()
+    .from(vehiclePartsRefs)
+    .where(
+      and(
+        eq(vehiclePartsRefs.teamId, me.teamId),
+        eq(vehiclePartsRefs.vehicleId, vehicleId),
+      ),
+    )
+    .orderBy(asc(vehiclePartsRefs.createdAt));
+
   // ---- server actions ----
 
   async function createWorkOrder(formData: FormData) {
@@ -161,6 +177,54 @@ export default async function VehicleDetailPage({
       driverReportStageNumber: stageNumber,
       eventId,
     });
+    revalidatePath(`/vehicles/${vehicleId}`);
+  }
+
+  async function addPartsRef(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const component = (formData.get("component") as string | null)?.trim();
+    if (!component) return;
+    await db.insert(vehiclePartsRefs).values({
+      teamId: u.teamId,
+      vehicleId,
+      component,
+      sourceVehicle: (formData.get("sourceVehicle") as string | null)?.trim() || null,
+      partNumber: (formData.get("partNumber") as string | null)?.trim() || null,
+      supplier: (formData.get("supplier") as string | null)?.trim() || null,
+      notes: (formData.get("notes") as string | null)?.trim() || null,
+    });
+    revalidatePath(`/vehicles/${vehicleId}`);
+  }
+
+  async function updatePartsRef(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = (formData.get("id") as string | null)?.trim();
+    const component = (formData.get("component") as string | null)?.trim();
+    if (!id || !component) return;
+    await db
+      .update(vehiclePartsRefs)
+      .set({
+        component,
+        sourceVehicle: (formData.get("sourceVehicle") as string | null)?.trim() || null,
+        partNumber: (formData.get("partNumber") as string | null)?.trim() || null,
+        supplier: (formData.get("supplier") as string | null)?.trim() || null,
+        notes: (formData.get("notes") as string | null)?.trim() || null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(vehiclePartsRefs.id, id), eq(vehiclePartsRefs.teamId, u.teamId)));
+    revalidatePath(`/vehicles/${vehicleId}`);
+  }
+
+  async function deletePartsRef(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const id = (formData.get("id") as string | null)?.trim();
+    if (!id) return;
+    await db
+      .delete(vehiclePartsRefs)
+      .where(and(eq(vehiclePartsRefs.id, id), eq(vehiclePartsRefs.teamId, u.teamId)));
     revalidatePath(`/vehicles/${vehicleId}`);
   }
 
@@ -358,6 +422,86 @@ export default async function VehicleDetailPage({
               );
             })}
           </ul>
+        </section>
+
+        <section className="mb-10">
+          <div className="mb-4 flex items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold tracking-tight">Parts reference</h2>
+            <span className="rc-muted text-xs">Aftermarket &amp; cross-platform components</span>
+          </div>
+
+          {/* Add form */}
+          {me.role === "chief" && (
+            <form action={addPartsRef} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
+              <input name="component"    required placeholder="Component *"        className="rc-input sm:col-span-3" />
+              <input name="sourceVehicle"        placeholder="Source vehicle / brand"  className="rc-input sm:col-span-3" />
+              <input name="partNumber"           placeholder="Part number(s)"          className="rc-input sm:col-span-2" />
+              <input name="supplier"             placeholder="Supplier / vendor"        className="rc-input sm:col-span-2" />
+              <input name="notes"                placeholder="Notes"                    className="rc-input sm:col-span-1" />
+              <button type="submit" className="rc-btn rc-btn-primary sm:col-span-1">Add</button>
+            </form>
+          )}
+
+          {partsRefs.length === 0 ? (
+            <p className="rc-empty-section">No parts reference entries yet.</p>
+          ) : (
+            <div className="rc-card overflow-x-auto p-0">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: "var(--border-strong)" }}>
+                    <th className="text-left py-2 px-3 font-semibold rc-muted">Component</th>
+                    <th className="text-left py-2 px-3 font-semibold rc-muted">Source vehicle / brand</th>
+                    <th className="text-left py-2 px-3 font-semibold rc-muted">Part number</th>
+                    <th className="text-left py-2 px-3 font-semibold rc-muted">Supplier</th>
+                    <th className="text-left py-2 px-3 font-semibold rc-muted">Notes</th>
+                    {me.role === "chief" && <th className="w-[90px]" />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {partsRefs.map((ref) => {
+                    const isEditing = editId === ref.id;
+                    return isEditing && me.role === "chief" ? (
+                      <tr key={ref.id} style={{ background: "var(--surface-elevated)" }}>
+                        <td colSpan={me.role === "chief" ? 6 : 5} className="px-3 py-3">
+                          <form action={updatePartsRef} className="grid grid-cols-1 gap-2 sm:grid-cols-12">
+                            <input type="hidden" name="id" value={ref.id} />
+                            <input name="component"     required defaultValue={ref.component}          placeholder="Component *"           className="rc-input sm:col-span-2" />
+                            <input name="sourceVehicle"          defaultValue={ref.sourceVehicle ?? ""} placeholder="Source vehicle / brand" className="rc-input sm:col-span-3" />
+                            <input name="partNumber"             defaultValue={ref.partNumber ?? ""}    placeholder="Part number(s)"         className="rc-input sm:col-span-2" />
+                            <input name="supplier"               defaultValue={ref.supplier ?? ""}      placeholder="Supplier / vendor"       className="rc-input sm:col-span-2" />
+                            <input name="notes"                  defaultValue={ref.notes ?? ""}         placeholder="Notes"                   className="rc-input sm:col-span-2" />
+                            <div className="flex gap-1 sm:col-span-1">
+                              <button type="submit" className="rc-btn rc-btn-primary text-xs px-2">Save</button>
+                              <Link href={`/vehicles/${vehicleId}`} className="rc-btn rc-btn-ghost text-xs px-2">✕</Link>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={ref.id} className="border-b rc-list-row" style={{ borderColor: "var(--border)" }}>
+                        <td className="py-2 px-3 font-semibold align-top">{ref.component}</td>
+                        <td className="py-2 px-3 align-top">{ref.sourceVehicle ?? <span className="rc-muted">—</span>}</td>
+                        <td className="py-2 px-3 align-top font-mono text-xs">{ref.partNumber ?? <span className="rc-muted">—</span>}</td>
+                        <td className="py-2 px-3 align-top">{ref.supplier ?? <span className="rc-muted">—</span>}</td>
+                        <td className="py-2 px-3 align-top rc-muted text-xs">{ref.notes ?? ""}</td>
+                        {me.role === "chief" && (
+                          <td className="py-2 px-3 align-top">
+                            <div className="flex gap-1">
+                              <Link href={`/vehicles/${vehicleId}?edit=${ref.id}`} className="rc-btn rc-btn-ghost text-xs px-2 py-1">Edit</Link>
+                              <form action={deletePartsRef}>
+                                <input type="hidden" name="id" value={ref.id} />
+                                <button type="submit" className="rc-btn rc-btn-danger text-xs px-2 py-1">×</button>
+                              </form>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         <section>

@@ -1028,6 +1028,44 @@ export const notifications = pgTable(
   }),
 );
 
+// ---------- Vehicle parts reference ----------
+//
+// Aftermarket / cross-platform component reference for a vehicle.
+// Answers "what exactly is this part and where do I buy the right replacement?"
+// Each row documents one component: what it is, what it came from, part numbers,
+// supplier, and any gotcha notes (e.g. "left/right differ", "needs spacer").
+
+export const vehiclePartsRefs = pgTable(
+  "vehicle_parts_refs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    vehicleId: uuid("vehicle_id")
+      .notNull()
+      .references(() => vehicles.id, { onDelete: "cascade" }),
+    /** What system/component this is: "Transmission", "Axle shafts", "Brakes" … */
+    component: text("component").notNull(),
+    /** Source vehicle or aftermarket brand: "2005 Subaru Impreza WRX", "Cusco" … */
+    sourceVehicle: text("source_vehicle"),
+    /** OEM or aftermarket part number(s) */
+    partNumber: text("part_number"),
+    /** Where to buy it: dealer, vendor name, URL */
+    supplier: text("supplier"),
+    /** Any other gotchas or context */
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    vehicleIdx: index("vehicle_parts_refs_vehicle_idx").on(t.teamId, t.vehicleId),
+  }),
+);
+
+export type VehiclePartsRef = typeof vehiclePartsRefs.$inferSelect;
+export type NewVehiclePartsRef = typeof vehiclePartsRefs.$inferInsert;
+
 // ---------- Movement plan ----------
 //
 // A movement plan is a per-event, per-day table of crew movements modelled

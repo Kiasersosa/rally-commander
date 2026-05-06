@@ -92,6 +92,13 @@
       "when": 1778007598912,
       "tag": "0012_movement_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1778110539526,
+      "tag": "0013_vehicle_parts_refs",
+      "breakpoints": true
     }
   ]
 }
