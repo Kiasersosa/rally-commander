@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { uploadDocument } from "@/lib/documents";
 import { getSignedDownloadUrl, isStorageConfigured } from "@/lib/storage";
+import { UploadButton } from "./UploadButton";
 
 type Params = Promise<{ eventId: string }>;
 
@@ -26,7 +27,7 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
   const isChief = me.role === "chief";
   const storageOk = isStorageConfigured();
 
-  // Find the latest supp_regs document for this event
+  // Find the supp_regs document for this event
   const [doc] = await db
     .select({ id: documents.id, name: documents.name })
     .from(documents)
@@ -63,7 +64,6 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
 
     if (v && storageOk) {
       latestVersion = v;
-      // 30-minute URLs — long enough to read the whole doc without needing a refresh
       viewUrl = await getSignedDownloadUrl(v.storageKey, 60 * 30, {
         inline: true,
         contentType: "application/pdf",
@@ -72,7 +72,6 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
     }
   }
 
-  // Upload server action
   async function uploadSuppRegs(formData: FormData) {
     "use server";
     const u = await getCurrentUser();
@@ -101,7 +100,7 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
       <Nav user={me} />
 
       <div className="mx-auto w-full max-w-7xl px-4 py-4 flex flex-col flex-1">
-        {/* Header bar */}
+        {/* Header */}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="mb-1 text-xs rc-muted">
@@ -122,20 +121,7 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
               </a>
             )}
             {isChief && storageOk && (
-              <label className="rc-btn rc-btn-primary text-sm cursor-pointer">
-                {hasDoc ? "Replace PDF" : "Upload PDF"}
-                <form id="supp-regs-upload-form" action={uploadSuppRegs} className="hidden">
-                  <input
-                    name="file"
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    onChange={(e) => {
-                      const form = document.getElementById("supp-regs-upload-form") as HTMLFormElement;
-                      if (e.target.files?.length) form.requestSubmit();
-                    }}
-                  />
-                </form>
-              </label>
+              <UploadButton action={uploadSuppRegs} label={hasDoc ? "Replace PDF" : "Upload PDF"} />
             )}
             {isChief && !storageOk && (
               <span className="text-xs rc-muted">R2 storage not configured</span>
@@ -143,7 +129,7 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
           </div>
         </div>
 
-        {/* PDF viewer */}
+        {/* Viewer */}
         {hasDoc ? (
           <div className="rc-card flex-1 p-0 overflow-hidden" style={{ minHeight: "75vh" }}>
             <iframe
@@ -159,31 +145,17 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
               No supplemental regulations uploaded yet for this event.
             </p>
             {isChief && storageOk && (
-              <label className="rc-btn rc-btn-primary cursor-pointer">
-                Upload PDF
-                <form id="supp-regs-upload-form-empty" action={uploadSuppRegs} className="hidden">
-                  <input
-                    name="file"
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    onChange={(e) => {
-                      const form = document.getElementById("supp-regs-upload-form-empty") as HTMLFormElement;
-                      if (e.target.files?.length) form.requestSubmit();
-                    }}
-                  />
-                </form>
-              </label>
+              <UploadButton action={uploadSuppRegs} label="Upload PDF" />
             )}
             {isChief && !storageOk && (
-              <p className="text-sm rc-muted">R2 storage is not configured — set R2_* env vars to enable uploads.</p>
+              <p className="text-sm rc-muted">R2 storage is not configured.</p>
             )}
           </div>
         )}
 
         {latestVersion && (
           <p className="mt-2 text-xs rc-muted text-right">
-            v{latestVersion.versionNumber} · {(latestVersion.sizeBytes / 1024).toFixed(0)} KB ·{" "}
-            <span>Viewer URL valid 30 min — refresh page to renew</span>
+            v{latestVersion.versionNumber} · {(latestVersion.sizeBytes / 1024).toFixed(0)} KB · viewer URL valid 30 min — refresh to renew
           </p>
         )}
       </div>
