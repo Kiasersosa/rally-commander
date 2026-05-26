@@ -16,6 +16,7 @@ import { Nav } from "@/components/Nav";
 import { uploadDocument } from "@/lib/documents";
 import { getSignedDownloadUrl, isStorageConfigured } from "@/lib/storage";
 import { recordAndSend } from "@/lib/notifications";
+import { SportityScreenshotScanner } from "@/components/SportityScreenshotScanner";
 
 type Params = Promise<{ eventId: string }>;
 
@@ -251,6 +252,8 @@ export default async function SportityUpdatesPage({
             </p>
           </div>
         </header>
+
+        {process.env.ANTHROPIC_API_KEY ? <SportityScreenshotScanner /> : null}
 
         {/* Add form */}
         <details className="rc-card mb-6" open={rows.length === 0}>
