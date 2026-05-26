@@ -17,6 +17,8 @@ type AllowedMedia = (typeof ALLOWED_MEDIA)[number];
 
 export type ScanResult = {
   title: string;
+  /** One-sentence at-a-glance gist of the post, ~200 chars max. */
+  summary: string;
   body_text: string;
   kind: "bulletin" | "document" | "schedule_change";
 };
@@ -33,6 +35,11 @@ const EXTRACT_TOOL = {
         description:
           "Short headline, ~120 chars max. The most prominent line, or the first sentence. If the post has a name like 'Bulletin #3', include that.",
       },
+      summary: {
+        type: "string",
+        description:
+          "ONE sentence (≤200 chars) telling the crew at a glance what this update actually does. Be concrete: 'SS6 cancelled, restart at TC6B' beats 'A bulletin about stage 6.' Empty string if unreadable.",
+      },
       body_text: {
         type: "string",
         description:
@@ -45,7 +52,7 @@ const EXTRACT_TOOL = {
           "Best guess. Use 'schedule_change' if the post is about a schedule update (cancelled stage, restart time, service window). Use 'document' if it's a file announcement. Otherwise 'bulletin'.",
       },
     },
-    required: ["title", "body_text", "kind"],
+    required: ["title", "summary", "body_text", "kind"],
   },
 };
 
@@ -119,6 +126,7 @@ export async function scanSportityScreenshot(
 
   return {
     title: typeof input.title === "string" ? input.title.slice(0, 240) : "",
+    summary: typeof input.summary === "string" ? input.summary.slice(0, 240) : "",
     body_text: typeof input.body_text === "string" ? input.body_text : "",
     kind,
   };
@@ -199,6 +207,7 @@ export async function scanAndCreateSportityItems(
           eventId,
           kind: scan.kind,
           title: scan.title || `(unread) ${file.name}`,
+          summary: scan.summary || null,
           bodyText: scan.body_text || null,
           documentId,
           postedByUserId: u.userId,
@@ -223,7 +232,10 @@ export async function scanAndCreateSportityItems(
     const body = [
       `${u.name} logged ${fulfilled.length} Sportity update${fulfilled.length === 1 ? "" : "s"}.`,
       ``,
-      ...fulfilled.map((f) => `• ${f.scan.title || "(unread)"}`),
+      ...fulfilled.map((f) => {
+        const head = f.scan.title || "(unread)";
+        return f.scan.summary ? `• ${head}\n  ${f.scan.summary}` : `• ${head}`;
+      }),
       ``,
       `See https://rallycommander.com/events/${eventId}/sportity-updates`,
     ].join("\n");

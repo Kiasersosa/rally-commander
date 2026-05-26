@@ -1,0 +1,1 @@
+ALTER TABLE "sportity_items" ADD COLUMN "summary" text;

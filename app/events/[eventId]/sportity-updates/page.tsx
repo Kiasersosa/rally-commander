@@ -59,6 +59,7 @@ export default async function SportityUpdatesPage({
       id: sportityItems.id,
       kind: sportityItems.kind,
       title: sportityItems.title,
+      summary: sportityItems.summary,
       bodyText: sportityItems.bodyText,
       documentId: sportityItems.documentId,
       sourceUrl: sportityItems.sourceUrl,
@@ -117,6 +118,7 @@ export default async function SportityUpdatesPage({
     const kind = (String(formData.get("kind") ?? "bulletin") as SportityItemKind);
     const title = String(formData.get("title") ?? "").trim();
     if (!title) throw new Error("title required");
+    const summary = String(formData.get("summary") ?? "").trim() || null;
     const bodyText = String(formData.get("body_text") ?? "").trim() || null;
     const sourceUrl = String(formData.get("source_url") ?? "").trim() || null;
     const postedAtRaw = String(formData.get("posted_at") ?? "").trim();
@@ -209,6 +211,7 @@ export default async function SportityUpdatesPage({
       eventId,
       kind,
       title,
+      summary,
       bodyText,
       documentId,
       sourceUrl,
@@ -294,11 +297,21 @@ export default async function SportityUpdatesPage({
             </label>
 
             <label className="flex flex-col gap-1 text-sm">
+              <span className="font-semibold">Summary (one sentence)</span>
+              <input
+                name="summary"
+                maxLength={240}
+                placeholder="e.g., SS6 cancelled, restart at TC6B"
+                className="rc-input"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm">
               <span className="font-semibold">Body</span>
               <textarea
                 name="body_text"
                 rows={4}
-                placeholder="Paste the bulletin text or summarize the change"
+                placeholder="Paste the bulletin text"
                 className="rc-textarea"
               />
             </label>
@@ -380,10 +393,18 @@ export default async function SportityUpdatesPage({
                       {r.notifiedCrew ? " · ✓ notified" : ""}
                     </div>
                   </div>
+                  {r.summary ? (
+                    <p className="mt-2 text-sm font-medium">{r.summary}</p>
+                  ) : null}
                   {r.bodyText ? (
-                    <p className="mt-2 whitespace-pre-wrap text-sm">
-                      {r.bodyText}
-                    </p>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer rc-muted text-xs hover:text-[var(--accent)] select-none list-none">
+                        {r.summary ? "Full text" : "Read more"} ▾
+                      </summary>
+                      <p className="mt-2 whitespace-pre-wrap text-sm rc-muted">
+                        {r.bodyText}
+                      </p>
+                    </details>
                   ) : null}
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
                     {downloadUrl ? (

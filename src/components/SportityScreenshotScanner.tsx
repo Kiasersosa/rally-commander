@@ -168,6 +168,11 @@ function applyToForm(result: ScanResult, file: File) {
   );
   if (titleInput && result.title) titleInput.value = result.title;
 
+  const summaryInput = document.querySelector<HTMLInputElement>(
+    'form input[name="summary"]',
+  );
+  if (summaryInput && result.summary) summaryInput.value = result.summary;
+
   const bodyInput = document.querySelector<HTMLTextAreaElement>(
     'form textarea[name="body_text"]',
   );
