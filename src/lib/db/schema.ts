@@ -114,6 +114,12 @@ export const crewStatusEnum = pgEnum("crew_status", [
   "other",
 ]);
 
+export const sportityItemKindEnum = pgEnum("sportity_item_kind", [
+  "bulletin",
+  "document",
+  "schedule_change",
+]);
+
 export const notificationChannelEnum = pgEnum("notification_channel", [
   "email",
   "sms",
@@ -1217,6 +1223,60 @@ export type ConditionReport = typeof conditionReports.$inferSelect;
 export type NewConditionReport = typeof conditionReports.$inferInsert;
 export type EquipmentCleanupSignoff = typeof equipmentCleanupSignoffs.$inferSelect;
 export type NewEquipmentCleanupSignoff = typeof equipmentCleanupSignoffs.$inferInsert;
+
+// ---------- Sportity feed ----------
+// Sportity is the organizer-side app that stewards use to post bulletins,
+// PDFs and schedule changes during a rally. It has no public API, so the
+// co-driver/crew chief logs items manually as they come in. Each item can
+// optionally fire an immediate email notification to the crew.
+//
+// Files (PDFs, photos) reuse the existing documents module — sportity_items
+// holds a nullable FK to the document. Text-only bulletins skip the file.
+
+export const sportityItems = pgTable(
+  "sportity_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    kind: sportityItemKindEnum("kind").notNull().default("bulletin"),
+    /** Short headline (required). */
+    title: text("title").notNull(),
+    /** Pasted-in text from Sportity (for bulletin / schedule_change). */
+    bodyText: text("body_text"),
+    /** Optional file attached to this item (stored as a Document). */
+    documentId: uuid("document_id").references(() => documents.id, {
+      onDelete: "set null",
+    }),
+    /** Optional link back to the original Sportity post. */
+    sourceUrl: text("source_url"),
+    /** Did crew get an email when this item was logged? Set true on success. */
+    notifiedCrew: boolean("notified_crew").notNull().default(false),
+    postedByUserId: uuid("posted_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    /** When Sportity itself published it (often differs from createdAt). */
+    postedAt: timestamp("posted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    eventIdx: index("sportity_items_event_idx").on(
+      t.teamId,
+      t.eventId,
+      t.createdAt,
+    ),
+  }),
+);
+
+export type SportityItem = typeof sportityItems.$inferSelect;
+export type NewSportityItem = typeof sportityItems.$inferInsert;
+export type SportityItemKind = (typeof sportityItemKindEnum.enumValues)[number];
 
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id

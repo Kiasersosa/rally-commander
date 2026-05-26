@@ -974,10 +974,10 @@ export default async function EventDetailPage({
               Movement plan ↗
             </Link>
             <Link
-              href={`/events/${eventId}/tech-ready`}
+              href={`/events/${eventId}/sportity-updates`}
               className="rc-link text-sm"
             >
-              Tech-ready ↗
+              Sportity updates ↗
             </Link>
             <Link
               href={`/events/${eventId}/condition-reports`}

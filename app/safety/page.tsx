@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import Link from "next/link";
 import { db } from "@/lib/db";
 import {
+  events,
   licenseDocs,
   safetyItems,
   users,
@@ -83,6 +85,18 @@ export default async function SafetyPage() {
     .from(users)
     .where(and(eq(users.teamId, me.teamId), isNull(users.deletedAt)))
     .orderBy(asc(users.name));
+
+  const upcomingEvents = await db
+    .select({
+      id: events.id,
+      name: events.name,
+      eventDate: events.eventDate,
+      phase: events.phase,
+    })
+    .from(events)
+    .where(and(eq(events.teamId, me.teamId), isNull(events.deletedAt)))
+    .orderBy(desc(events.eventDate))
+    .limit(10);
 
   const referenceDate = new Date();
   const safetyWarnings = deriveWarnings(
@@ -185,6 +199,44 @@ export default async function SafetyPage() {
             <a href="/equipment" className="rc-link">Equipment tab</a>.
           </p>
         </header>
+
+        <section className="mb-10">
+          <h2 className="mb-3 text-lg font-semibold tracking-tight">Tech-ready by event</h2>
+          <p className="rc-muted mb-3 text-sm">
+            Per-event red/yellow/green status for safety + licensing items, computed
+            against each event&apos;s date.
+          </p>
+          {upcomingEvents.length === 0 ? (
+            <p className="rc-empty-section">No events to check.</p>
+          ) : (
+            <ul className="rc-list">
+              {upcomingEvents.map((e) => (
+                <li key={e.id} className="rc-list-row">
+                  <div>
+                    <Link
+                      href={`/events/${e.id}/tech-ready`}
+                      className="rc-link font-medium"
+                    >
+                      {e.name}
+                    </Link>
+                    <div className="rc-muted text-sm">{e.eventDate}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`rc-badge rc-badge-${e.phase}`}>
+                      {e.phase.replace("_", " ")}
+                    </span>
+                    <Link
+                      href={`/events/${e.id}/tech-ready`}
+                      className="rc-btn rc-btn-ghost text-xs"
+                    >
+                      View →
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <section className="mb-10">
           <h2 className="mb-3 text-lg font-semibold tracking-tight">Safety gear</h2>
