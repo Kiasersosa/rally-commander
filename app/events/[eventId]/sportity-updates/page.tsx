@@ -253,7 +253,9 @@ export default async function SportityUpdatesPage({
           </div>
         </header>
 
-        {process.env.ANTHROPIC_API_KEY ? <SportityScreenshotScanner /> : null}
+        {process.env.ANTHROPIC_API_KEY ? (
+          <SportityScreenshotScanner eventId={eventId} />
+        ) : null}
 
         {/* Add form */}
         <details className="rc-card mb-6" open={rows.length === 0}>

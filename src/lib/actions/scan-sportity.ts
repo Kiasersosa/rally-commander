@@ -1,7 +1,14 @@
 "use server";
 
 import Anthropic from "@anthropic-ai/sdk";
-import { requireSession } from "@/lib/authz";
+import { and, eq, isNull, inArray } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { db } from "@/lib/db";
+import { events, sportityItems, users } from "@/lib/db/schema";
+import { requireFullAccess, requireSession } from "@/lib/authz";
+import { uploadDocument } from "@/lib/documents";
+import { isStorageConfigured } from "@/lib/storage";
+import { recordAndSend } from "@/lib/notifications";
 
 const SYSTEM_PROMPT = `You read screenshots from the Sportity rally-organizer app and extract the post's content. Strip UI chrome (timestamps, avatars, navigation) and keep just the bulletin/document/schedule-change content. Call the extract_post tool with your result. If the image is unreadable or empty, call the tool with empty strings.`;
 
@@ -114,5 +121,152 @@ export async function scanSportityScreenshot(
     title: typeof input.title === "string" ? input.title.slice(0, 240) : "",
     body_text: typeof input.body_text === "string" ? input.body_text : "",
     kind,
+  };
+}
+
+export type BatchScanResult = {
+  created: number;
+  failed: number;
+  /** Did the caller ask to notify? */
+  notifyRequested: boolean;
+  /** Did at least one notification deliver? */
+  notifyDelivered: boolean;
+};
+
+/**
+ * Multi-screenshot batch: OCR each image in parallel, create one
+ * sportity_item per file with the extracted content + the image
+ * attached as a Document. Optionally fires a single summary email
+ * to every active crew member (one email each, not one-per-item).
+ */
+export async function scanAndCreateSportityItems(
+  formData: FormData,
+): Promise<BatchScanResult> {
+  const u = await requireFullAccess();
+  const eventId = String(formData.get("event_id") ?? "");
+  if (!eventId) throw new Error("event_id required");
+  const notify = String(formData.get("notify") ?? "") === "on";
+
+  const [event] = await db
+    .select({ id: events.id, name: events.name })
+    .from(events)
+    .where(
+      and(
+        eq(events.id, eventId),
+        eq(events.teamId, u.teamId),
+        isNull(events.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!event) throw new Error("event not found");
+
+  const rawFiles = formData.getAll("files");
+  const files = rawFiles.filter(
+    (f): f is File => f instanceof File && f.size > 0,
+  );
+  if (files.length === 0) throw new Error("no files");
+
+  // Process each screenshot in parallel: OCR + upload + insert.
+  const results = await Promise.allSettled(
+    files.map(async (file) => {
+      const scanFd = new FormData();
+      scanFd.append("file", file);
+      const scan = await scanSportityScreenshot(scanFd);
+
+      let documentId: string | null = null;
+      if (isStorageConfigured()) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const docCategory =
+          scan.kind === "schedule_change" ? "schedule" : "bulletin";
+        const r = await uploadDocument({
+          teamId: u.teamId,
+          userId: u.userId,
+          eventId,
+          category: docCategory,
+          name: scan.title || file.name.replace(/\.[^.]+$/, ""),
+          filename: file.name,
+          contentType: file.type || "image/png",
+          bytes,
+          mustAcknowledge: false,
+        });
+        documentId = r.documentId;
+      }
+
+      const [row] = await db
+        .insert(sportityItems)
+        .values({
+          teamId: u.teamId,
+          eventId,
+          kind: scan.kind,
+          title: scan.title || `(unread) ${file.name}`,
+          bodyText: scan.body_text || null,
+          documentId,
+          postedByUserId: u.userId,
+        })
+        .returning({ id: sportityItems.id });
+      return { itemId: row.id, scan };
+    }),
+  );
+
+  const fulfilled = results.flatMap((r) =>
+    r.status === "fulfilled" ? [r.value] : [],
+  );
+  const failed = results.length - fulfilled.length;
+
+  let notifyDelivered = false;
+  if (notify && fulfilled.length > 0) {
+    const crew = await db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(and(eq(users.teamId, u.teamId), isNull(users.deletedAt)));
+    const subject = `[Sportity · ${event.name}] ${fulfilled.length} new update${fulfilled.length === 1 ? "" : "s"}`;
+    const body = [
+      `${u.name} logged ${fulfilled.length} Sportity update${fulfilled.length === 1 ? "" : "s"}.`,
+      ``,
+      ...fulfilled.map((f) => `• ${f.scan.title || "(unread)"}`),
+      ``,
+      `See https://rallycommander.com/events/${eventId}/sportity-updates`,
+    ].join("\n");
+
+    const sends = await Promise.allSettled(
+      crew
+        .filter((c) => c.email && c.email.includes("@"))
+        .map((c) =>
+          recordAndSend({
+            teamId: u.teamId,
+            userId: c.id,
+            channel: "email",
+            kind: "bulletin",
+            recipient: c.email,
+            subject,
+            body,
+          }),
+        ),
+    );
+    notifyDelivered = sends.some(
+      (s) => s.status === "fulfilled" && s.value.delivered,
+    );
+
+    if (notifyDelivered) {
+      const itemIds = fulfilled.map((f) => f.itemId);
+      await db
+        .update(sportityItems)
+        .set({ notifiedCrew: true })
+        .where(
+          and(
+            eq(sportityItems.teamId, u.teamId),
+            inArray(sportityItems.id, itemIds),
+          ),
+        );
+    }
+  }
+
+  revalidatePath(`/events/${eventId}/sportity-updates`);
+  revalidatePath(`/events/${eventId}`);
+  return {
+    created: fulfilled.length,
+    failed,
+    notifyRequested: notify,
+    notifyDelivered,
   };
 }
