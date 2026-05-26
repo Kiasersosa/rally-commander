@@ -79,20 +79,21 @@ export function SportityScreenshotScanner({ eventId }: { eventId: string }) {
     <div className="rc-card mb-4 flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2">
         <label className="text-sm font-semibold">
-          Scan screenshot{status.kind === "scanning" && status.total > 1 ? "s" : ""} to log updates
+          Scan screenshot or PDF to log updates
         </label>
         {renderStatus(status)}
       </div>
       <p className="rc-muted text-xs">
-        Pick <strong>one</strong> screenshot to pre-fill the form below and review.
-        Pick <strong>multiple</strong> to log each as its own item automatically
-        (great for clearing a backlog at a service stop). Each image is also
-        attached to its item.
+        Pick <strong>one</strong> screenshot or PDF to pre-fill the form below
+        and review. Pick <strong>multiple</strong> to log each as its own item
+        automatically (great for clearing a backlog at a service stop). The
+        original file is also attached to its item. PDFs use local text
+        extraction; images use Claude vision.
       </p>
       <input
         ref={inputRef}
         type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp"
+        accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,.pdf"
         multiple
         onChange={onChange}
         disabled={pending}

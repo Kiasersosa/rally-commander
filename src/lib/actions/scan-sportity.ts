@@ -3,6 +3,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { and, eq, isNull, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { extractText, getDocumentProxy } from "unpdf";
 import { db } from "@/lib/db";
 import { events, sportityItems, users } from "@/lib/db/schema";
 import { requireFullAccess, requireSession } from "@/lib/authz";
@@ -10,7 +11,7 @@ import { uploadDocument } from "@/lib/documents";
 import { isStorageConfigured } from "@/lib/storage";
 import { recordAndSend } from "@/lib/notifications";
 
-const SYSTEM_PROMPT = `You read screenshots from the Sportity rally-organizer app and extract the post's content. Strip UI chrome (timestamps, avatars, navigation) and keep just the bulletin/document/schedule-change content. Call the extract_post tool with your result. If the image is unreadable or empty, call the tool with empty strings.`;
+const SYSTEM_PROMPT = `You read posts shared from the Sportity rally-organizer app. Input is either a screenshot (image) or the extracted text of a PDF that was posted in Sportity. In either case, extract the post's content into the extract_post tool. Strip UI chrome (timestamps, avatars, navigation, page numbers from PDFs) and keep just the bulletin/document/schedule-change content. If the input is unreadable or empty, call the tool with empty strings.`;
 
 const ALLOWED_MEDIA = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
 type AllowedMedia = (typeof ALLOWED_MEDIA)[number];
@@ -56,6 +57,13 @@ const EXTRACT_TOOL = {
   },
 };
 
+async function extractPdfText(bytes: Uint8Array): Promise<string> {
+  // unpdf accepts a Uint8Array of the PDF bytes and returns plain text.
+  const pdf = await getDocumentProxy(bytes);
+  const { text } = await extractText(pdf, { mergePages: true });
+  return Array.isArray(text) ? text.join("\n") : text;
+}
+
 export async function scanSportityScreenshot(
   formData: FormData,
 ): Promise<ScanResult> {
@@ -67,18 +75,49 @@ export async function scanSportityScreenshot(
 
   const file = formData.get("file") as File | null;
   if (!file || file.size === 0) throw new Error("file required");
-  if (file.size > 8 * 1024 * 1024) {
-    throw new Error("image too large (8 MB max)");
+  if (file.size > 12 * 1024 * 1024) {
+    throw new Error("file too large (12 MB max)");
   }
-  const rawType = (file.type || "image/png").toLowerCase();
-  const mediaType: AllowedMedia = (ALLOWED_MEDIA as readonly string[]).includes(
-    rawType,
-  )
-    ? (rawType as AllowedMedia)
-    : "image/png";
-
+  const rawType = (file.type || "").toLowerCase();
   const bytes = new Uint8Array(await file.arrayBuffer());
-  const base64 = Buffer.from(bytes).toString("base64");
+
+  const isPdf =
+    rawType === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+  // Build the user-content block based on file type. PDFs go through
+  // local text extraction (cheaper, no vision tokens) — images go through
+  // Claude vision.
+  let userContent: Anthropic.ContentBlockParam[];
+  if (isPdf) {
+    const text = (await extractPdfText(bytes)).trim();
+    if (!text) {
+      return { title: "", summary: "", body_text: "", kind: "document" };
+    }
+    userContent = [
+      {
+        type: "text",
+        text: `This is the text extracted from a PDF that was shared on Sportity. Treat it like a Sportity post and extract via the tool.\n\n---\n${text.slice(0, 50_000)}`,
+      },
+    ];
+  } else {
+    const mediaType: AllowedMedia = (
+      ALLOWED_MEDIA as readonly string[]
+    ).includes(rawType)
+      ? (rawType as AllowedMedia)
+      : "image/png";
+    const base64 = Buffer.from(bytes).toString("base64");
+    userContent = [
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: mediaType,
+          data: base64,
+        },
+      },
+      { type: "text", text: "Extract the post." },
+    ];
+  }
 
   const client = new Anthropic();
   const message = await client.messages.create({
@@ -87,22 +126,7 @@ export async function scanSportityScreenshot(
     system: SYSTEM_PROMPT,
     tools: [EXTRACT_TOOL],
     tool_choice: { type: "tool", name: "extract_post" },
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mediaType,
-              data: base64,
-            },
-          },
-          { type: "text", text: "Extract the post." },
-        ],
-      },
-    ],
+    messages: [{ role: "user", content: userContent }],
   });
 
   const toolUse = message.content.find(
@@ -114,7 +138,7 @@ export async function scanSportityScreenshot(
     console.error("[scan-sportity] no tool_use block in response", {
       stopReason: message.stop_reason,
     });
-    return { title: "", body_text: "", kind: "bulletin" };
+    return { title: "", summary: "", body_text: "", kind: "bulletin" };
   }
 
   const input = toolUse.input as Partial<Record<string, unknown>>;
