@@ -102,6 +102,21 @@ export default async function TeamPage() {
     revalidatePath("/team");
   }
 
+  async function permanentlyDelete(formData: FormData) {
+    "use server";
+    const u = await requireChief();
+    const userId = String(formData.get("user_id") ?? "");
+    if (!userId || userId === u.userId) return;
+    try {
+      await db
+        .delete(users)
+        .where(and(eq(users.id, userId), eq(users.teamId, u.teamId)));
+    } catch {
+      // FK constraints prevent deletion if user has history — leave as revoked
+    }
+    revalidatePath("/team");
+  }
+
   return (
     <>
       <Nav user={me} />
@@ -172,12 +187,20 @@ export default async function TeamPage() {
               </div>
               {me.role === "chief" && c.id !== me.userId ? (
                 c.deletedAt ? (
-                  <form action={restore}>
-                    <input type="hidden" name="user_id" value={c.id} />
-                    <button type="submit" className="rc-btn rc-btn-ghost text-sm">
-                      Restore
-                    </button>
-                  </form>
+                  <div className="flex gap-2">
+                    <form action={restore}>
+                      <input type="hidden" name="user_id" value={c.id} />
+                      <button type="submit" className="rc-btn rc-btn-ghost text-sm">
+                        Restore
+                      </button>
+                    </form>
+                    <form action={permanentlyDelete}>
+                      <input type="hidden" name="user_id" value={c.id} />
+                      <button type="submit" className="rc-btn rc-btn-danger text-sm">
+                        Delete
+                      </button>
+                    </form>
+                  </div>
                 ) : (
                   <form action={revoke}>
                     <input type="hidden" name="user_id" value={c.id} />

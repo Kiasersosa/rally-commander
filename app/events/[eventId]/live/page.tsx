@@ -16,7 +16,7 @@ import {
   workOrders,
   type CrewStatus,
 } from "@/lib/db/schema";
-import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole, requireFullAccess, requireSession } from "@/lib/authz";
 import { DOCUMENT_CATEGORY_LABEL } from "@/lib/documents";
 import { ServiceStopTimer } from "./ServiceStopTimer";
 
@@ -222,7 +222,7 @@ export default async function LivePage({ params }: { params: Params }) {
 
   async function startServiceStop(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const name = String(formData.get("name") ?? "").trim() || "Service stop";
     const minutesRaw = String(formData.get("minutes") ?? "30");
     const minutes = Math.max(1, Number.parseInt(minutesRaw, 10) || 30);
@@ -238,7 +238,7 @@ export default async function LivePage({ params }: { params: Params }) {
 
   async function endServiceStop() {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     if (!activeStop) return;
     await db
       .update(serviceStops)
@@ -470,7 +470,7 @@ export default async function LivePage({ params }: { params: Params }) {
                   plannedSeconds={activeStop.plannedDurationSeconds}
                 />
               </div>
-              {me.role === "chief" ? (
+              {isFullAccessRole(me.role) ? (
                 <form action={endServiceStop}>
                   <button type="submit" className="rc-btn rc-btn-ghost">
                     End service stop
@@ -532,7 +532,7 @@ export default async function LivePage({ params }: { params: Params }) {
               </button>
             </form>
           </div>
-        ) : me.role === "chief" ? (
+        ) : isFullAccessRole(me.role) ? (
           <form action={startServiceStop} className="flex flex-col gap-3">
             <input
               name="name"

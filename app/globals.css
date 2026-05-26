@@ -287,6 +287,99 @@ body {
   color: transparent;
 }
 
+/* Nav hover dropdowns. Pure-CSS hover reveal on `.rc-nav-item:hover`. The
+   dropdown has a 6px top padding inside its positioning box so that the
+   mouse can travel from the trigger to the menu without losing hover. */
+
+.rc-nav-item {
+  position: relative;
+}
+
+.rc-nav-dropdown {
+  position: absolute;
+  top: 100%;
+  left: -0.5rem;
+  margin-top: 0.25rem;
+  min-width: 14rem;
+  max-width: 22rem;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.625rem;
+  box-shadow: 0 10px 24px rgba(28, 25, 23, 0.18),
+              0 2px 6px rgba(28, 25, 23, 0.08);
+  padding: 0.35rem;
+  display: none;
+  z-index: 40;
+}
+
+.rc-nav-item:hover .rc-nav-dropdown,
+.rc-nav-item:focus-within .rc-nav-dropdown {
+  display: block;
+}
+
+.rc-nav-dropdown-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 0.4rem;
+  color: var(--foreground);
+  font-size: 0.875rem;
+  text-decoration: none;
+  font-weight: 500;
+  transition: background-color 0.1s, color 0.1s;
+}
+
+.rc-nav-dropdown-link:hover {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.rc-nav-dropdown-link-strong {
+  font-weight: 600;
+}
+
+.rc-nav-dropdown-link-accent {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.rc-nav-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0;
+}
+
+/* ---------- Dialog / modal ---------- */
+
+.rc-dialog {
+  background: transparent;
+  border: none;
+  padding: 0;
+  max-width: 38rem;
+  width: calc(100vw - 2rem);
+  margin: auto;
+}
+
+.rc-dialog::backdrop {
+  background: rgba(28, 25, 23, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.rc-dialog-inner {
+  background: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  box-shadow: 0 25px 50px rgba(28, 25, 23, 0.3);
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
 /* ---------- Empty / list / row ---------- */
 
 .rc-empty-section {

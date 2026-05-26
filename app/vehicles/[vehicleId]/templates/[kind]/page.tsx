@@ -9,7 +9,7 @@ import {
   vehicles,
   type ChecklistKind,
 } from "@/lib/db/schema";
-import { getCurrentUser, requireChief } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole, requireFullAccess } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { ALL_KINDS, KIND_LABEL } from "@/lib/checklists";
 
@@ -26,7 +26,7 @@ export default async function TemplateEditorPage({
   if (!ALL_KINDS.includes(kindRaw as ChecklistKind)) notFound();
   const kind = kindRaw as ChecklistKind;
 
-  if (me.role !== "chief") {
+  if (!isFullAccessRole(me.role)) {
     return (
       <>
         <Nav user={me} />
@@ -90,7 +90,7 @@ export default async function TemplateEditorPage({
 
   async function addItem(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const label = String(formData.get("label") ?? "").trim();
     const description =
       String(formData.get("description") ?? "").trim() || null;
@@ -120,7 +120,7 @@ export default async function TemplateEditorPage({
 
   async function removeItem(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const itemId = String(formData.get("item_id") ?? "");
     if (!itemId) return;
     await db
@@ -136,7 +136,7 @@ export default async function TemplateEditorPage({
 
   async function moveItem(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const itemId = String(formData.get("item_id") ?? "");
     const dir = String(formData.get("dir") ?? "");
     if (!itemId || (dir !== "up" && dir !== "down")) return;

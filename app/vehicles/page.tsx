@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { vehicles, workOrders, type VehicleType } from "@/lib/db/schema";
-import { getCurrentUser, requireChief } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole, requireFullAccess } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 
 const TYPES: VehicleType[] = ["rally_car", "service_truck", "trailer"];
@@ -34,7 +34,7 @@ export default async function VehiclesPage() {
 
   async function createVehicle(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const type = String(formData.get("type") ?? "") as VehicleType;
     const name = String(formData.get("name") ?? "").trim();
     const year = Number.parseInt(String(formData.get("year") ?? ""), 10);
@@ -66,7 +66,7 @@ export default async function VehiclesPage() {
           </p>
         </header>
 
-        {me.role === "chief" ? (
+        {isFullAccessRole(me.role) ? (
           <form
             action={createVehicle}
             className="rc-card mb-8 grid grid-cols-1 gap-3 sm:grid-cols-12"
@@ -119,7 +119,7 @@ export default async function VehiclesPage() {
         {rows.length === 0 ? (
           <div className="rc-empty-section text-center">
             No vehicles yet.{" "}
-            {me.role === "chief"
+            {isFullAccessRole(me.role)
               ? "Add one above."
               : "Your chief hasn't registered any."}
           </div>

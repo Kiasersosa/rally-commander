@@ -9,7 +9,7 @@ import {
   movementPlanEntries,
   users,
 } from "@/lib/db/schema";
-import { getCurrentUser, requireChief } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 
 type Params = Promise<{ eventId: string }>;
@@ -221,7 +221,7 @@ export default async function MovementPlanPage({
     .limit(1);
   if (!event) notFound();
 
-  const isChief = me.role === "chief";
+  const isChief = isFullAccessRole(me.role);
 
   const days = await db
     .select()

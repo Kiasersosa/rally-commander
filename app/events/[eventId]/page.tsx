@@ -40,7 +40,7 @@ import {
   formatCents,
   reconcile,
 } from "@/lib/budget-reconciler";
-import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole, requireFullAccess, requireSession } from "@/lib/authz";
 import { advance } from "@/lib/event-lifecycle";
 import { Nav } from "@/components/Nav";
 import { instantiateChecklistsForEvent, KIND_LABEL } from "@/lib/checklists";
@@ -374,7 +374,7 @@ export default async function EventDetailPage({
     .from(todos)
     .innerJoin(users, eq(users.id, todos.assigneeUserId))
     .where(
-      me.role === "chief"
+      isFullAccessRole(me.role)
         ? and(eq(todos.teamId, me.teamId), eq(todos.eventId, eventId))
         : and(
             eq(todos.teamId, me.teamId),
@@ -388,7 +388,7 @@ export default async function EventDetailPage({
 
   async function advancePhase() {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const [current] = await db
       .select({ phase: events.phase })
       .from(events)
@@ -407,7 +407,7 @@ export default async function EventDetailPage({
 
   async function saveDebrief(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const notes = String(formData.get("debrief_notes") ?? "");
     await db
       .update(events)
@@ -418,7 +418,7 @@ export default async function EventDetailPage({
 
   async function createTodo(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const title = String(formData.get("title") ?? "").trim();
     const description =
       String(formData.get("description") ?? "").trim() || null;
@@ -531,7 +531,7 @@ export default async function EventDetailPage({
   // ---- Itinerary actions ----
   async function addLeg(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const fromLocation = String(formData.get("from_location") ?? "").trim();
     const toLocation = String(formData.get("to_location") ?? "").trim();
     if (!fromLocation || !toLocation) throw new Error("from and to required");
@@ -579,7 +579,7 @@ export default async function EventDetailPage({
 
   async function deleteLeg(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await db
@@ -590,7 +590,7 @@ export default async function EventDetailPage({
 
   async function moveLeg(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     const dir = String(formData.get("dir") ?? "");
     if (!id || (dir !== "up" && dir !== "down")) return;
@@ -624,7 +624,7 @@ export default async function EventDetailPage({
   // ---- Hotel actions ----
   async function addHotel(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const name = String(formData.get("name") ?? "").trim();
     if (!name) return;
     const address = String(formData.get("address") ?? "").trim() || null;
@@ -651,7 +651,7 @@ export default async function EventDetailPage({
 
   async function deleteHotel(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await db
@@ -663,7 +663,7 @@ export default async function EventDetailPage({
   // ---- Meal plan actions ----
   async function addMeal(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const what = String(formData.get("what") ?? "").trim();
     if (!what) return;
     const whereAt = String(formData.get("where_at") ?? "").trim() || null;
@@ -682,7 +682,7 @@ export default async function EventDetailPage({
 
   async function deleteMeal(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await db
@@ -694,7 +694,7 @@ export default async function EventDetailPage({
   // ---- Recce actions ----
   async function addStage(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const stageNumber = Number.parseInt(
       String(formData.get("stage_number") ?? ""),
       10,
@@ -714,7 +714,7 @@ export default async function EventDetailPage({
 
   async function deleteStage(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await db
@@ -725,7 +725,7 @@ export default async function EventDetailPage({
 
   async function addRecceEntry(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const stageId = String(formData.get("stage_id") ?? "");
     const dayRaw = String(formData.get("day") ?? "").trim();
     const passNumber =
@@ -749,7 +749,7 @@ export default async function EventDetailPage({
 
   async function deleteRecceEntry(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await db
@@ -765,7 +765,7 @@ export default async function EventDetailPage({
 
   async function saveRecceLogistics(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const notes = String(formData.get("recce_logistics_notes") ?? "");
     await db
       .update(events)
@@ -778,7 +778,7 @@ export default async function EventDetailPage({
 
   async function upsertBudgetLine(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const category = String(formData.get("category") ?? "") as BudgetCategory;
     if (!ALL_BUDGET_CATEGORIES.includes(category)) return;
     const dollars = String(formData.get("amount") ?? "0");
@@ -816,7 +816,7 @@ export default async function EventDetailPage({
 
   async function deleteBudgetLine(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await db
@@ -884,7 +884,7 @@ export default async function EventDetailPage({
       eventId,
       category,
       name,
-      mustAcknowledge: u.role === "chief" ? mustAck : false,
+      mustAcknowledge: isFullAccessRole(u.role) ? mustAck : false,
       filename: file.name,
       contentType: file.type || "application/octet-stream",
       bytes,
@@ -894,7 +894,7 @@ export default async function EventDetailPage({
 
   async function rebuildChecklists() {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     await instantiateChecklistsForEvent(u.teamId, eventId);
     revalidatePath(`/events/${eventId}`);
   }
@@ -910,7 +910,7 @@ export default async function EventDetailPage({
       .where(and(eq(todos.id, todoId), eq(todos.teamId, u.teamId)))
       .limit(1);
     if (!t) throw new Error("Todo not found");
-    if (u.role !== "chief" && t.assigneeUserId !== u.userId) {
+    if (!isFullAccessRole(u.role) && t.assigneeUserId !== u.userId) {
       throw new Error("You can only complete your own todos.");
     }
     await db
@@ -924,7 +924,7 @@ export default async function EventDetailPage({
     revalidatePath(`/events/${eventId}`);
   }
 
-  const canAdvance = me.role === "chief" && event.phase !== "post_event";
+  const canAdvance = isFullAccessRole(me.role) && event.phase !== "post_event";
 
   // % ready to ship across all packing instances on this event
   const packingRows = checklistRows.filter((r) => r.kind === "packing");
@@ -979,6 +979,20 @@ export default async function EventDetailPage({
             >
               Tech-ready ↗
             </Link>
+            <Link
+              href={`/events/${eventId}/condition-reports`}
+              className="rc-link text-sm"
+            >
+              Condition reports ↗
+            </Link>
+            {(event.phase === "on_event" || event.phase === "post_event") ? (
+              <Link
+                href={`/events/${eventId}/cleanup`}
+                className="rc-link text-sm"
+              >
+                Post-race cleanup ↗
+              </Link>
+            ) : null}
             {readyPct !== null ? (
               <span
                 className={`rc-badge rc-badge-${readyPct === 100 ? "on_event" : readyPct === 0 ? "post_event" : "prep"}`}
@@ -1031,7 +1045,7 @@ export default async function EventDetailPage({
             </div>
           </div>
 
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form action={addLeg} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
               <input
                 name="from_location"
@@ -1144,7 +1158,7 @@ export default async function EventDetailPage({
                           <div className="rc-muted mt-1 text-xs">{l.notes}</div>
                         ) : null}
                       </div>
-                      {me.role === "chief" ? (
+                      {isFullAccessRole(me.role) ? (
                         <div className="flex items-center gap-1">
                           <form action={moveLeg}>
                             <input type="hidden" name="id" value={l.id} />
@@ -1227,7 +1241,7 @@ export default async function EventDetailPage({
                 </option>
               ))}
             </select>
-            {me.role === "chief" ? (
+            {isFullAccessRole(me.role) ? (
               <label className="flex items-center gap-2 text-sm sm:col-span-2">
                 <input type="checkbox" name="must_acknowledge" />
                 Must ack
@@ -1303,7 +1317,7 @@ export default async function EventDetailPage({
             </div>
           </div>
 
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form
               action={upsertBudgetLine}
               className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
@@ -1380,7 +1394,7 @@ export default async function EventDetailPage({
                     >
                       {formatCents(c.varianceCents)}
                     </span>
-                    {me.role === "chief" && matchingLine ? (
+                    {isFullAccessRole(me.role) && matchingLine ? (
                       <form action={deleteBudgetLine}>
                         <input type="hidden" name="id" value={matchingLine.id} />
                         <button
@@ -1491,7 +1505,7 @@ export default async function EventDetailPage({
             </Link>
           </div>
 
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form
               action={addStage}
               className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
@@ -1524,7 +1538,7 @@ export default async function EventDetailPage({
           {stages.length === 0 ? (
             <p className="rc-muted mb-4 text-sm">
               No stages defined yet.{" "}
-              {me.role === "chief"
+              {isFullAccessRole(me.role)
                 ? "Add the first one above."
                 : "Your chief hasn't added stages."}
             </p>
@@ -1543,7 +1557,7 @@ export default async function EventDetailPage({
                       <div className="rc-muted mt-0.5 text-sm">{s.notes}</div>
                     ) : null}
                   </div>
-                  {me.role === "chief" ? (
+                  {isFullAccessRole(me.role) ? (
                     <form action={deleteStage}>
                       <input type="hidden" name="id" value={s.id} />
                       <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
@@ -1561,7 +1575,7 @@ export default async function EventDetailPage({
               <h3 className="mb-2 mt-4 text-sm font-semibold uppercase tracking-wide rc-muted">
                 Recce schedule
               </h3>
-              {me.role === "chief" ? (
+              {isFullAccessRole(me.role) ? (
                 <form
                   action={addRecceEntry}
                   className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
@@ -1658,7 +1672,7 @@ export default async function EventDetailPage({
                           <div className="rc-muted mt-1 text-xs">{r.notes}</div>
                         ) : null}
                       </div>
-                      {me.role === "chief" ? (
+                      {isFullAccessRole(me.role) ? (
                         <form action={deleteRecceEntry}>
                           <input type="hidden" name="id" value={r.id} />
                           <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
@@ -1676,7 +1690,7 @@ export default async function EventDetailPage({
           <h3 className="mb-2 mt-4 text-sm font-semibold uppercase tracking-wide rc-muted">
             Recce logistics notes
           </h3>
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form action={saveRecceLogistics} className="rc-card flex flex-col gap-2">
               <textarea
                 name="recce_logistics_notes"
@@ -1700,7 +1714,7 @@ export default async function EventDetailPage({
 
         <section className="mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Hotels</h2>
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form action={addHotel} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
               <input
                 name="name"
@@ -1770,7 +1784,7 @@ export default async function EventDetailPage({
                       <div className="rc-muted mt-1 text-xs">{h.notes}</div>
                     ) : null}
                   </div>
-                  {me.role === "chief" ? (
+                  {isFullAccessRole(me.role) ? (
                     <form action={deleteHotel}>
                       <input type="hidden" name="id" value={h.id} />
                       <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
@@ -1786,7 +1800,7 @@ export default async function EventDetailPage({
 
         <section className="mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Meal plan</h2>
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form action={addMeal} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
               <input
                 name="when_at"
@@ -1842,7 +1856,7 @@ export default async function EventDetailPage({
                       </div>
                     ) : null}
                   </div>
-                  {me.role === "chief" ? (
+                  {isFullAccessRole(me.role) ? (
                     <form action={deleteMeal}>
                       <input type="hidden" name="id" value={m.id} />
                       <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
@@ -2022,7 +2036,7 @@ export default async function EventDetailPage({
         <section className="mb-10">
           <div className="mb-4 flex items-baseline justify-between">
             <h2 className="text-lg font-semibold tracking-tight">Checklists</h2>
-            {me.role === "chief" ? (
+            {isFullAccessRole(me.role) ? (
               <form action={rebuildChecklists}>
                 <button type="submit" className="rc-btn rc-btn-ghost text-xs">
                   Rebuild from templates
@@ -2074,10 +2088,10 @@ export default async function EventDetailPage({
 
         <section className="mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">
-            {me.role === "chief" ? "Event todos" : "My todos"}
+            {isFullAccessRole(me.role) ? "Event todos" : "My todos"}
           </h2>
 
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form
               action={createTodo}
               className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12"
@@ -2124,7 +2138,7 @@ export default async function EventDetailPage({
               {todoRows.map((t) => {
                 const canComplete =
                   !t.completedAt &&
-                  (me.role === "chief" || t.assigneeUserId === me.userId);
+                  (isFullAccessRole(me.role) || t.assigneeUserId === me.userId);
                 return (
                   <li key={t.id} className="rc-list-row">
                     <div>
@@ -2168,7 +2182,7 @@ export default async function EventDetailPage({
           <h2 className="mb-4 text-lg font-semibold tracking-tight">
             Post-event debrief
           </h2>
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form action={saveDebrief} className="rc-card flex flex-col gap-3">
               <textarea
                 name="debrief_notes"

@@ -47,6 +47,31 @@ export async function requireChief(): Promise<SessionUser> {
   return user;
 }
 
+/**
+ * Roles with write access to event/equipment/vehicle/document/safety data.
+ * Chief + driver + co_driver. Other roles (lead_mechanic, assistant, gopher)
+ * are read-only.
+ */
+export const FULL_ACCESS_ROLES: ReadonlyArray<UserRole> = [
+  "chief",
+  "driver",
+  "co_driver",
+];
+
+export function isFullAccessRole(role: UserRole): boolean {
+  return FULL_ACCESS_ROLES.includes(role);
+}
+
+export async function requireFullAccess(): Promise<SessionUser> {
+  const user = await requireSession();
+  if (!isFullAccessRole(user.role)) {
+    throw new ForbiddenError(
+      "Only the crew chief, driver, or co-driver can modify data.",
+    );
+  }
+  return user;
+}
+
 export function jsonError(err: unknown): Response {
   if (err instanceof UnauthorizedError) {
     return Response.json({ error: err.message }, { status: 401 });

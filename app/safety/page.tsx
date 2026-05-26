@@ -3,15 +3,13 @@ import { revalidatePath } from "next/cache";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
-  equipmentItems,
   licenseDocs,
   safetyItems,
   users,
-  type EquipmentCategory,
   type LicenseKind,
   type SafetyItemType,
 } from "@/lib/db/schema";
-import { getCurrentUser, requireChief } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole, requireFullAccess } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import {
   BAND_BADGE_CLASS,
@@ -43,19 +41,6 @@ const LICENSE_LABEL: Record<LicenseKind, string> = {
   ara: "ARA license",
   fia: "FIA license",
   medical: "Medical certificate",
-};
-
-const EQUIPMENT_CATEGORIES: EquipmentCategory[] = [
-  "service_tool",
-  "comms",
-  "filming",
-  "other",
-];
-const EQUIPMENT_LABEL: Record<EquipmentCategory, string> = {
-  service_tool: "Service tool",
-  comms: "Comms",
-  filming: "Filming",
-  other: "Other",
 };
 
 export default async function SafetyPage() {
@@ -93,14 +78,6 @@ export default async function SafetyPage() {
     .where(and(eq(licenseDocs.teamId, me.teamId), isNull(licenseDocs.deletedAt)))
     .orderBy(asc(users.name), asc(licenseDocs.kind));
 
-  const equipment = await db
-    .select()
-    .from(equipmentItems)
-    .where(
-      and(eq(equipmentItems.teamId, me.teamId), isNull(equipmentItems.deletedAt)),
-    )
-    .orderBy(asc(equipmentItems.category));
-
   const crew = await db
     .select({ id: users.id, name: users.name })
     .from(users)
@@ -131,7 +108,7 @@ export default async function SafetyPage() {
 
   async function addSafetyItem(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const type = String(formData.get("type") ?? "") as SafetyItemType;
     if (!SAFETY_TYPES.includes(type)) return;
     const spec = String(formData.get("spec") ?? "").trim() || null;
@@ -153,7 +130,7 @@ export default async function SafetyPage() {
 
   async function deleteSafetyItem(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await db
@@ -165,7 +142,7 @@ export default async function SafetyPage() {
 
   async function addLicense(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const holderUserId = String(formData.get("holder_user_id") ?? "");
     const kind = String(formData.get("kind") ?? "") as LicenseKind;
     if (!holderUserId || !LICENSE_KINDS.includes(kind)) return;
@@ -185,7 +162,7 @@ export default async function SafetyPage() {
 
   async function deleteLicense(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = String(formData.get("id") ?? "");
     if (!id) return;
     await db
@@ -195,53 +172,23 @@ export default async function SafetyPage() {
     revalidatePath("/safety");
   }
 
-  async function addEquipment(formData: FormData) {
-    "use server";
-    const u = await requireChief();
-    const category = String(formData.get("category") ?? "") as EquipmentCategory;
-    if (!EQUIPMENT_CATEGORIES.includes(category)) return;
-    const description = String(formData.get("description") ?? "").trim();
-    if (!description) return;
-    const location = String(formData.get("location") ?? "").trim() || null;
-    const notes = String(formData.get("notes") ?? "").trim() || null;
-    await db.insert(equipmentItems).values({
-      teamId: u.teamId,
-      category,
-      description,
-      location,
-      notes,
-    });
-    revalidatePath("/safety");
-  }
-
-  async function deleteEquipment(formData: FormData) {
-    "use server";
-    const u = await requireChief();
-    const id = String(formData.get("id") ?? "");
-    if (!id) return;
-    await db
-      .update(equipmentItems)
-      .set({ deletedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(equipmentItems.id, id), eq(equipmentItems.teamId, u.teamId)));
-    revalidatePath("/safety");
-  }
-
   return (
     <>
       <Nav user={me} />
       <main className="mx-auto max-w-5xl px-6 py-10">
         <header className="mb-8">
           <h1 className="text-3xl font-semibold tracking-tight">
-            Safety, licensing, equipment
+            Safety &amp; licensing
           </h1>
           <p className="rc-muted mt-1 text-sm">
-            Tech-ready inventory. Expiry warnings ladder at 6mo / 3mo / 1mo / 1wk.
+            Tech-ready inventory. Expiry warnings ladder at 6mo / 3mo / 1mo / 1wk. Equipment is tracked under the{" "}
+            <a href="/equipment" className="rc-link">Equipment tab</a>.
           </p>
         </header>
 
         <section className="mb-10">
           <h2 className="mb-3 text-lg font-semibold tracking-tight">Safety gear</h2>
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form
               action={addSafetyItem}
               className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
@@ -318,7 +265,7 @@ export default async function SafetyPage() {
                         {BAND_LABEL[w.band]}
                       </span>
                     ) : null}
-                    {me.role === "chief" ? (
+                    {isFullAccessRole(me.role) ? (
                       <form action={deleteSafetyItem}>
                         <input type="hidden" name="id" value={s.id} />
                         <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
@@ -335,7 +282,7 @@ export default async function SafetyPage() {
 
         <section className="mb-10">
           <h2 className="mb-3 text-lg font-semibold tracking-tight">Licenses & medical</h2>
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form
               action={addLicense}
               className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
@@ -408,7 +355,7 @@ export default async function SafetyPage() {
                         {BAND_LABEL[w.band]}
                       </span>
                     ) : null}
-                    {me.role === "chief" ? (
+                    {isFullAccessRole(me.role) ? (
                       <form action={deleteLicense}>
                         <input type="hidden" name="id" value={l.id} />
                         <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
@@ -423,80 +370,6 @@ export default async function SafetyPage() {
           )}
         </section>
 
-        <section>
-          <h2 className="mb-3 text-lg font-semibold tracking-tight">Equipment</h2>
-          {me.role === "chief" ? (
-            <form
-              action={addEquipment}
-              className="rc-card mb-3 grid grid-cols-1 gap-2 sm:grid-cols-12"
-            >
-              <select
-                name="category"
-                required
-                defaultValue=""
-                className="rc-select sm:col-span-2"
-              >
-                <option value="" disabled>
-                  Category…
-                </option>
-                {EQUIPMENT_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {EQUIPMENT_LABEL[c]}
-                  </option>
-                ))}
-              </select>
-              <input
-                name="description"
-                required
-                placeholder="Description (e.g., Floor jack 3-ton)"
-                className="rc-input sm:col-span-5"
-              />
-              <input
-                name="location"
-                placeholder="Where it lives"
-                className="rc-input sm:col-span-3"
-              />
-              <input
-                name="notes"
-                placeholder="Notes"
-                className="rc-input sm:col-span-1"
-              />
-              <button type="submit" className="rc-btn rc-btn-primary sm:col-span-1">
-                Add
-              </button>
-            </form>
-          ) : null}
-          {equipment.length === 0 ? (
-            <p className="rc-muted text-sm">No equipment registered.</p>
-          ) : (
-            <ul className="rc-list">
-              {equipment.map((e) => (
-                <li key={e.id} className="rc-list-row">
-                  <div className="flex-1">
-                    <div className="font-medium">
-                      {EQUIPMENT_LABEL[e.category]} · {e.description}
-                    </div>
-                    {e.location || e.notes ? (
-                      <div className="rc-muted text-sm">
-                        {e.location ?? ""}
-                        {e.location && e.notes ? " · " : ""}
-                        {e.notes ?? ""}
-                      </div>
-                    ) : null}
-                  </div>
-                  {me.role === "chief" ? (
-                    <form action={deleteEquipment}>
-                      <input type="hidden" name="id" value={e.id} />
-                      <button type="submit" className="rc-btn rc-btn-danger px-2 py-1 text-xs">
-                        ×
-                      </button>
-                    </form>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
       </main>
     </>
   );

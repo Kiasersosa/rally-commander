@@ -4,7 +4,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { documents, documentVersions, events } from "@/lib/db/schema";
-import { getCurrentUser } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { uploadDocument } from "@/lib/documents";
 import { getSignedDownloadUrl, isStorageConfigured } from "@/lib/storage";
@@ -24,7 +24,7 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
     .limit(1);
   if (!event) notFound();
 
-  const isChief = me.role === "chief";
+  const isChief = isFullAccessRole(me.role);
   const storageOk = isStorageConfigured();
 
   // Find the supp_regs document for this event
@@ -75,7 +75,7 @@ export default async function SuppRegsPage({ params }: { params: Params }) {
   async function uploadSuppRegs(formData: FormData) {
     "use server";
     const u = await getCurrentUser();
-    if (!u || u.role !== "chief") return;
+    if (!u || !isFullAccessRole(u.role)) return;
     const file = formData.get("file") as File | null;
     if (!file || file.size === 0) return;
     const bytes = new Uint8Array(await file.arrayBuffer());

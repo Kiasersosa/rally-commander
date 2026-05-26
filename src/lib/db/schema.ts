@@ -95,8 +95,13 @@ export const licenseKindEnum = pgEnum("license_kind", [
 
 export const equipmentCategoryEnum = pgEnum("equipment_category", [
   "service_tool",
+  "tools",
+  "mechanics",
+  "cooking",
+  "transport",
   "comms",
   "filming",
+  "electronics",
   "other",
 ]);
 
@@ -885,7 +890,16 @@ export const equipmentItems = pgTable(
       .references(() => teams.id, { onDelete: "restrict" }),
     category: equipmentCategoryEnum("category").notNull(),
     description: text("description").notNull(),
+    /** How many of this item. */
+    qty: integer("qty").notNull().default(1),
+    /** Which bag / case / tote it rides in (e.g. "Red tool bag", "Trailer shelf B"). */
+    packedIn: text("packed_in"),
+    /** Permanent home when not at an event (e.g. "Jason's garage shelf 2"). */
     location: text("location"),
+    /** Who is responsible for returning this item. */
+    belongsToUserId: uuid("belongs_to_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
     notes: text("notes"),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -1125,6 +1139,84 @@ export type MovementPlanDay = typeof movementPlanDays.$inferSelect;
 export type NewMovementPlanDay = typeof movementPlanDays.$inferInsert;
 export type MovementPlanEntry = typeof movementPlanEntries.$inferSelect;
 export type NewMovementPlanEntry = typeof movementPlanEntries.$inferInsert;
+
+// ---------- Driver + car condition reports ----------
+// In-rally log entered while the car is in transit (typically by the co-driver
+// while the driver focuses on driving). Captures driver physical state and
+// car concerns. Crew-visible. Optionally links to a work order if a concern
+// warrants mechanic follow-up.
+
+export const conditionReports = pgTable(
+  "condition_reports",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    loggedByUserId: uuid("logged_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    /** 1-5 chips. 1 = great, 5 = bad. Null = not rated. */
+    fatigueRating: integer("fatigue_rating"),
+    hydrationRating: integer("hydration_rating"),
+    tempRating: integer("temp_rating"),
+    /** Free-text car concerns (e.g. "vibration at high RPM, soft brake pedal"). */
+    carConcerns: text("car_concerns"),
+    /** Free-text note for anything else (mood, stage notes, etc.) */
+    notes: text("notes"),
+    /** Optional context — "between SS3 and SS4", "at Service B", etc. */
+    location: text("location"),
+    /** Optional auto-created WO if concerns warrant mechanic action. */
+    workOrderId: uuid("work_order_id").references(() => workOrders.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventIdx: index("condition_reports_event_idx").on(t.teamId, t.eventId, t.createdAt),
+  }),
+);
+
+// ---------- Post-race equipment cleanup ----------
+// Per-event sign-off log against the team's equipment registry. Crew ticks
+// each item as it's returned to its proper bag / vehicle after the rally.
+// Unique on (event, item) means each item can only be signed off once per
+// event (un-sign-off via DELETE).
+
+export const equipmentCleanupSignoffs = pgTable(
+  "equipment_cleanup_signoffs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "restrict" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    equipmentItemId: uuid("equipment_item_id")
+      .notNull()
+      .references(() => equipmentItems.id, { onDelete: "cascade" }),
+    signedByUserId: uuid("signed_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    signedAt: timestamp("signed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    eventItemUnique: uniqueIndex("equipment_cleanup_signoffs_event_item_unique").on(
+      t.eventId,
+      t.equipmentItemId,
+    ),
+    eventIdx: index("equipment_cleanup_signoffs_event_idx").on(t.teamId, t.eventId),
+  }),
+);
+
+export type ConditionReport = typeof conditionReports.$inferSelect;
+export type NewConditionReport = typeof conditionReports.$inferInsert;
+export type EquipmentCleanupSignoff = typeof equipmentCleanupSignoffs.$inferSelect;
+export type NewEquipmentCleanupSignoff = typeof equipmentCleanupSignoffs.$inferInsert;
 
 // ---------- Auth.js (NextAuth v5) tables ----------
 // Per @auth/drizzle-adapter docs. Schema is intentionally adapter-shape; team_id

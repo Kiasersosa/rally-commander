@@ -10,7 +10,7 @@ import {
   events,
   users,
 } from "@/lib/db/schema";
-import { getCurrentUser, requireSession, requireChief } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole, requireSession, requireFullAccess } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import {
   DOCUMENT_CATEGORY_LABEL,
@@ -129,7 +129,7 @@ export default async function DocumentDetailPage({
 
   async function setMustAck(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const on = String(formData.get("on") ?? "") === "1";
     await db
       .update(documents)
@@ -140,7 +140,7 @@ export default async function DocumentDetailPage({
 
   async function softDelete() {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     await db
       .update(documents)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -175,7 +175,7 @@ export default async function DocumentDetailPage({
             {doc.mustAcknowledge ? (
               <span className="rc-badge rc-badge-prep">Must acknowledge</span>
             ) : null}
-            {me.role === "chief" ? (
+            {isFullAccessRole(me.role) ? (
               <>
                 <form action={setMustAck}>
                   <input

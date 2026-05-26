@@ -10,7 +10,7 @@ import {
   events,
   vehicles,
 } from "@/lib/db/schema";
-import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole, requireFullAccess, requireSession } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { KIND_LABEL, loadChecklistState } from "@/lib/checklists";
 
@@ -95,7 +95,7 @@ export default async function ChecklistInstancePage({
 
   async function copyFromPriorEvent() {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     if (meta.kind !== "packing") return;
     // Find the most recent prior packing instance for this vehicle on a
     // DIFFERENT event, then copy any items not already present.
@@ -237,7 +237,7 @@ export default async function ChecklistInstancePage({
                 Add
               </button>
             </form>
-            {me.role === "chief" ? (
+            {isFullAccessRole(me.role) ? (
               <form action={copyFromPriorEvent} className="rc-card flex flex-col gap-2">
                 <label className="text-sm font-medium">Copy from prior event</label>
                 <p className="rc-muted text-xs">

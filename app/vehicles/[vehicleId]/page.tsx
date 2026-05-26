@@ -13,7 +13,7 @@ import {
   checklistTemplateItems,
   type VehicleType,
 } from "@/lib/db/schema";
-import { getCurrentUser, requireChief, requireSession } from "@/lib/authz";
+import { getCurrentUser, isFullAccessRole, requireFullAccess, requireSession } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { statusLabel } from "@/lib/work-order-lifecycle";
 import { ALL_KINDS, KIND_LABEL } from "@/lib/checklists";
@@ -182,7 +182,7 @@ export default async function VehicleDetailPage({
 
   async function addPartsRef(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const component = (formData.get("component") as string | null)?.trim();
     if (!component) return;
     await db.insert(vehiclePartsRefs).values({
@@ -199,7 +199,7 @@ export default async function VehicleDetailPage({
 
   async function updatePartsRef(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = (formData.get("id") as string | null)?.trim();
     const component = (formData.get("component") as string | null)?.trim();
     if (!id || !component) return;
@@ -219,7 +219,7 @@ export default async function VehicleDetailPage({
 
   async function deletePartsRef(formData: FormData) {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     const id = (formData.get("id") as string | null)?.trim();
     if (!id) return;
     await db
@@ -230,7 +230,7 @@ export default async function VehicleDetailPage({
 
   async function deleteVehicle() {
     "use server";
-    const u = await requireChief();
+    const u = await requireFullAccess();
     await db
       .update(vehicles)
       .set({ deletedAt: new Date(), updatedAt: new Date() })
@@ -255,7 +255,7 @@ export default async function VehicleDetailPage({
               {vehicle.plate ? ` · ${vehicle.plate}` : ""}
             </div>
           </div>
-          {me.role === "chief" ? (
+          {isFullAccessRole(me.role) ? (
             <form action={deleteVehicle}>
               <button type="submit" className="rc-btn rc-btn-danger text-sm">
                 Remove vehicle
@@ -416,7 +416,7 @@ export default async function VehicleDetailPage({
                     </div>
                   </div>
                   <span className="rc-muted text-xs">
-                    {me.role === "chief" ? "Edit →" : "View →"}
+                    {isFullAccessRole(me.role) ? "Edit →" : "View →"}
                   </span>
                 </li>
               );
@@ -431,7 +431,7 @@ export default async function VehicleDetailPage({
           </div>
 
           {/* Add form */}
-          {me.role === "chief" && (
+          {isFullAccessRole(me.role) && (
             <form action={addPartsRef} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
               <input name="component"    required placeholder="Component *"        className="rc-input sm:col-span-3" />
               <input name="sourceVehicle"        placeholder="Source vehicle / brand"  className="rc-input sm:col-span-3" />
@@ -454,15 +454,15 @@ export default async function VehicleDetailPage({
                     <th className="text-left py-2 px-3 font-semibold rc-muted">Part number</th>
                     <th className="text-left py-2 px-3 font-semibold rc-muted">Supplier</th>
                     <th className="text-left py-2 px-3 font-semibold rc-muted">Notes</th>
-                    {me.role === "chief" && <th className="w-[90px]" />}
+                    {isFullAccessRole(me.role) && <th className="w-[90px]" />}
                   </tr>
                 </thead>
                 <tbody>
                   {partsRefs.map((ref) => {
                     const isEditing = editId === ref.id;
-                    return isEditing && me.role === "chief" ? (
+                    return isEditing && isFullAccessRole(me.role) ? (
                       <tr key={ref.id} style={{ background: "var(--surface-elevated)" }}>
-                        <td colSpan={me.role === "chief" ? 6 : 5} className="px-3 py-3">
+                        <td colSpan={isFullAccessRole(me.role) ? 6 : 5} className="px-3 py-3">
                           <form action={updatePartsRef} className="grid grid-cols-1 gap-2 sm:grid-cols-12">
                             <input type="hidden" name="id" value={ref.id} />
                             <input name="component"     required defaultValue={ref.component}          placeholder="Component *"           className="rc-input sm:col-span-2" />
@@ -484,7 +484,7 @@ export default async function VehicleDetailPage({
                         <td className="py-2 px-3 align-top font-mono text-xs">{ref.partNumber ?? <span className="rc-muted">—</span>}</td>
                         <td className="py-2 px-3 align-top">{ref.supplier ?? <span className="rc-muted">—</span>}</td>
                         <td className="py-2 px-3 align-top rc-muted text-xs">{ref.notes ?? ""}</td>
-                        {me.role === "chief" && (
+                        {isFullAccessRole(me.role) && (
                           <td className="py-2 px-3 align-top">
                             <div className="flex gap-1">
                               <Link href={`/vehicles/${vehicleId}?edit=${ref.id}`} className="rc-btn rc-btn-ghost text-xs px-2 py-1">Edit</Link>
