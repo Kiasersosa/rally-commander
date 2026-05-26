@@ -64,6 +64,81 @@ async function extractPdfText(bytes: Uint8Array): Promise<string> {
   return Array.isArray(text) ? text.join("\n") : text;
 }
 
+type DetectedKind =
+  | { kind: "pdf" }
+  | { kind: "image"; mediaType: AllowedMedia }
+  | { kind: "unknown" };
+
+/**
+ * Identify file type by its magic bytes — more reliable than file.type or
+ * filename, which can both be wrong when the user picks a file from Google
+ * Drive on iOS/Android. Falls back to mime / extension if magic bytes aren't
+ * recognized.
+ */
+function detectFileKind(bytes: Uint8Array, file: File): DetectedKind {
+  // PDF: "%PDF"
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46
+  ) {
+    return { kind: "pdf" };
+  }
+  // PNG: 89 50 4E 47
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return { kind: "image", mediaType: "image/png" };
+  }
+  // JPEG: FF D8 FF
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return { kind: "image", mediaType: "image/jpeg" };
+  }
+  // GIF: "GIF8"
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x47 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x38
+  ) {
+    return { kind: "image", mediaType: "image/gif" };
+  }
+  // WebP: "RIFF" .... "WEBP"
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return { kind: "image", mediaType: "image/webp" };
+  }
+  // Magic bytes didn't match — fall back to file.type / name.
+  const rawType = (file.type || "").toLowerCase();
+  if (rawType === "application/pdf") return { kind: "pdf" };
+  if (file.name.toLowerCase().endsWith(".pdf")) return { kind: "pdf" };
+  if ((ALLOWED_MEDIA as readonly string[]).includes(rawType)) {
+    return { kind: "image", mediaType: rawType as AllowedMedia };
+  }
+  return { kind: "unknown" };
+}
+
 export async function scanSportityScreenshot(
   formData: FormData,
 ): Promise<ScanResult> {
@@ -78,17 +153,14 @@ export async function scanSportityScreenshot(
   if (file.size > 12 * 1024 * 1024) {
     throw new Error("file too large (12 MB max)");
   }
-  const rawType = (file.type || "").toLowerCase();
   const bytes = new Uint8Array(await file.arrayBuffer());
-
-  const isPdf =
-    rawType === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  const detected = detectFileKind(bytes, file);
 
   // Build the user-content block based on file type. PDFs go through
   // local text extraction (cheaper, no vision tokens) — images go through
-  // Claude vision.
+  // Claude vision. Unknown formats are rejected so we don't waste a call.
   let userContent: Anthropic.ContentBlockParam[];
-  if (isPdf) {
+  if (detected.kind === "pdf") {
     const text = (await extractPdfText(bytes)).trim();
     if (!text) {
       return { title: "", summary: "", body_text: "", kind: "document" };
@@ -99,24 +171,23 @@ export async function scanSportityScreenshot(
         text: `This is the text extracted from a PDF that was shared on Sportity. Treat it like a Sportity post and extract via the tool.\n\n---\n${text.slice(0, 50_000)}`,
       },
     ];
-  } else {
-    const mediaType: AllowedMedia = (
-      ALLOWED_MEDIA as readonly string[]
-    ).includes(rawType)
-      ? (rawType as AllowedMedia)
-      : "image/png";
+  } else if (detected.kind === "image") {
     const base64 = Buffer.from(bytes).toString("base64");
     userContent = [
       {
         type: "image",
         source: {
           type: "base64",
-          media_type: mediaType,
+          media_type: detected.mediaType,
           data: base64,
         },
       },
       { type: "text", text: "Extract the post." },
     ];
+  } else {
+    throw new Error(
+      `Unsupported file type for ${file.name}. Pick a PDF or an image (PNG/JPEG/GIF/WebP).`,
+    );
   }
 
   const client = new Anthropic();
