@@ -9,7 +9,7 @@ import { events, sportityItems, users } from "@/lib/db/schema";
 import { requireFullAccess, requireSession } from "@/lib/authz";
 import { uploadDocument } from "@/lib/documents";
 import { isStorageConfigured } from "@/lib/storage";
-import { recordAndSend } from "@/lib/notifications";
+import { fanOutToCrew } from "@/lib/notifications";
 
 const SYSTEM_PROMPT = `You read posts shared from the Sportity rally-organizer app. Input is either a screenshot (image) or the extracted text of a PDF that was posted in Sportity. In either case, extract the post's content into the extract_post tool. Strip UI chrome (timestamps, avatars, navigation, page numbers from PDFs) and keep just the bulletin/document/schedule-change content. If the input is unreadable or empty, call the tool with empty strings.`;
 
@@ -319,12 +319,8 @@ export async function scanAndCreateSportityItems(
 
   let notifyDelivered = false;
   if (notify && fulfilled.length > 0) {
-    const crew = await db
-      .select({ id: users.id, email: users.email })
-      .from(users)
-      .where(and(eq(users.teamId, u.teamId), isNull(users.deletedAt)));
-    const subject = `[Sportity · ${event.name}] ${fulfilled.length} new update${fulfilled.length === 1 ? "" : "s"}`;
-    const body = [
+    const headline = `[Sportity · ${event.name}] ${fulfilled.length} new update${fulfilled.length === 1 ? "" : "s"}`;
+    const emailBody = [
       `${u.name} logged ${fulfilled.length} Sportity update${fulfilled.length === 1 ? "" : "s"}.`,
       ``,
       ...fulfilled.map((f) => {
@@ -334,25 +330,24 @@ export async function scanAndCreateSportityItems(
       ``,
       `See https://rallycommander.com/events/${eventId}/sportity-updates`,
     ].join("\n");
+    // Tight SMS body — single segment when possible. First title gets
+    // referenced; remaining are summarized as a count.
+    const firstTitle = fulfilled[0]?.scan.title || "new update";
+    const moreCount = fulfilled.length - 1;
+    const smsBody =
+      moreCount > 0
+        ? `Rally Commander: ${fulfilled.length} new Sportity updates for ${event.name}: "${firstTitle.slice(0, 60)}" + ${moreCount} more. View: rallycommander.com Reply STOP to opt out.`
+        : `Rally Commander: [Sportity · ${event.name}] ${firstTitle.slice(0, 90)}. View: rallycommander.com Reply STOP to opt out.`;
 
-    const sends = await Promise.allSettled(
-      crew
-        .filter((c) => c.email && c.email.includes("@"))
-        .map((c) =>
-          recordAndSend({
-            teamId: u.teamId,
-            userId: c.id,
-            channel: "email",
-            kind: "bulletin",
-            recipient: c.email,
-            subject,
-            body,
-          }),
-        ),
-    );
-    notifyDelivered = sends.some(
-      (s) => s.status === "fulfilled" && s.value.delivered,
-    );
+    const fanResult = await fanOutToCrew({
+      teamId: u.teamId,
+      kind: "bulletin",
+      subject: headline,
+      emailBody,
+      smsBody,
+    });
+    notifyDelivered =
+      fanResult.emailDelivered > 0 || fanResult.smsDelivered > 0;
 
     if (notifyDelivered) {
       const itemIds = fulfilled.map((f) => f.itemId);

@@ -15,7 +15,7 @@ import { getCurrentUser, requireFullAccess } from "@/lib/authz";
 import { Nav } from "@/components/Nav";
 import { uploadDocument } from "@/lib/documents";
 import { getSignedDownloadUrl, isStorageConfigured } from "@/lib/storage";
-import { recordAndSend } from "@/lib/notifications";
+import { fanOutToCrew } from "@/lib/notifications";
 import { SportityScreenshotScanner } from "@/components/SportityScreenshotScanner";
 
 type Params = Promise<{ eventId: string }>;
@@ -164,46 +164,40 @@ export default async function SportityUpdatesPage({
       documentId = r.documentId;
     }
 
-    // Try to send the notification BEFORE inserting so we can record the
-    // delivered state. Email-only for now (SMS deferred on A2P 10DLC).
+    // Notify before inserting so we can record the delivered state. Email
+    // always; SMS to anyone with phone_number set + sms_opt_in = true.
     let notified = false;
     if (notify) {
-      const crew = await db
-        .select({ id: users.id, name: users.name, email: users.email })
-        .from(users)
-        .where(and(eq(users.teamId, u.teamId), isNull(users.deletedAt)));
-      const subject = `[Sportity · ${event.name}] ${title}`;
-      const bodyLines = [
+      const headline = `[Sportity · ${event.name}] ${title}`;
+      const emailLines = [
         `${KIND_LABEL[kind]} from Sportity, logged by ${u.name}.`,
         ``,
         title,
       ];
-      if (bodyText) {
-        bodyLines.push(``, bodyText);
-      }
-      if (sourceUrl) {
-        bodyLines.push(``, `Source: ${sourceUrl}`);
-      }
-      const body = bodyLines.join("\n");
-      // Fire all recipients in parallel, swallow individual failures.
-      const results = await Promise.allSettled(
-        crew
-          .filter((c) => c.email && c.email.includes("@"))
-          .map((c) =>
-            recordAndSend({
-              teamId: u.teamId,
-              userId: c.id,
-              channel: "email",
-              kind: "bulletin",
-              recipient: c.email,
-              subject,
-              body,
-            }),
-          ),
+      if (summary) emailLines.push(``, summary);
+      if (bodyText) emailLines.push(``, bodyText);
+      if (sourceUrl) emailLines.push(``, `Source: ${sourceUrl}`);
+      emailLines.push(
+        ``,
+        `View: https://rallycommander.com/events/${eventId}/sportity-updates`,
       );
-      notified = results.some(
-        (r) => r.status === "fulfilled" && r.value.delivered,
-      );
+      const emailBody = emailLines.join("\n");
+
+      // SMS — tight single-segment form when possible.
+      const smsLead = summary
+        ? `${title.slice(0, 60)} — ${summary.slice(0, 90)}`
+        : title.slice(0, 130);
+      const smsBody = `Rally Commander: [Sportity · ${event.name}] ${smsLead}. View: rallycommander.com Reply STOP to opt out.`;
+
+      const fanResult = await fanOutToCrew({
+        teamId: u.teamId,
+        kind: "bulletin",
+        subject: headline,
+        emailBody,
+        smsBody,
+      });
+      notified =
+        fanResult.emailDelivered > 0 || fanResult.smsDelivered > 0;
     }
 
     await db.insert(sportityItems).values({

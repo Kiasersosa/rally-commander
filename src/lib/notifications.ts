@@ -1,11 +1,12 @@
 // Notification send adapters (Resend for email, Twilio for SMS) + an audit-log
 // helper that records every send to the `notifications` table.
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { Resend } from "resend";
 import { db } from "./db";
 import {
   notifications,
+  users,
   type NotificationChannel,
   type NotificationKind,
 } from "./db/schema";
@@ -135,5 +136,91 @@ export async function recordAndSend(args: SendArgs): Promise<{
     notificationId: row.id,
     delivered: result.ok,
     error: result.error,
+  };
+}
+
+export type FanOutResult = {
+  emailSent: number;
+  emailDelivered: number;
+  smsSent: number;
+  smsDelivered: number;
+};
+
+/**
+ * Fan a notification out to every active crew member on a team:
+ *   - email to anyone with a valid email
+ *   - SMS to anyone with phone_number set AND sms_opt_in = true
+ *
+ * Channels are independent — opting out of SMS does not affect email delivery.
+ * Every send is recorded in the notifications audit table (pending → sent / failed).
+ * Returns counts for surfacing in the UI / API response.
+ */
+export async function fanOutToCrew(args: {
+  teamId: string;
+  kind: NotificationKind;
+  subject: string;
+  emailBody: string;
+  smsBody: string;
+}): Promise<FanOutResult> {
+  const crew = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      phoneNumber: users.phoneNumber,
+      smsOptIn: users.smsOptIn,
+    })
+    .from(users)
+    .where(and(eq(users.teamId, args.teamId), isNull(users.deletedAt)));
+
+  // Email — every active user with a plausible email.
+  const emailTargets = crew.filter(
+    (c) => c.email && c.email.includes("@"),
+  );
+  const emailResults = await Promise.allSettled(
+    emailTargets.map((c) =>
+      recordAndSend({
+        teamId: args.teamId,
+        userId: c.id,
+        channel: "email",
+        kind: args.kind,
+        recipient: c.email,
+        subject: args.subject,
+        body: args.emailBody,
+      }),
+    ),
+  );
+  const emailDelivered = emailResults.filter(
+    (r) => r.status === "fulfilled" && r.value.delivered,
+  ).length;
+
+  // SMS — only users who provided a phone AND opted in.
+  const smsTargets = crew.filter(
+    (c) =>
+      c.smsOptIn &&
+      typeof c.phoneNumber === "string" &&
+      c.phoneNumber.startsWith("+"),
+  );
+  const smsResults = await Promise.allSettled(
+    smsTargets.map((c) =>
+      recordAndSend({
+        teamId: args.teamId,
+        userId: c.id,
+        channel: "sms",
+        kind: args.kind,
+        recipient: c.phoneNumber!,
+        subject: null,
+        body: args.smsBody,
+      }),
+    ),
+  );
+  const smsDelivered = smsResults.filter(
+    (r) => r.status === "fulfilled" && r.value.delivered,
+  ).length;
+
+  return {
+    emailSent: emailTargets.length,
+    emailDelivered,
+    smsSent: smsTargets.length,
+    smsDelivered,
   };
 }

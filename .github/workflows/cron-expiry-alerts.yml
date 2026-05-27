@@ -1,10 +1,13 @@
-name: Daily expiry alerts cron (manual — SMS deferred)
+name: Daily expiry alerts cron
 
-# Schedule disabled — SMS deferred until A2P 10DLC registration or a
-# toll-free number is in place. The weekly digest already covers expiring
-# items in the 1-week band, so daily SMS isn't strictly needed.
-# Re-enable by adding a `schedule:` block back when SMS is wired.
+# Re-enabled 2026-05-27 — A2P 10DLC brand + campaign submitted to TCR;
+# fan-out helper sends to email always, and to SMS for users with phone
+# set + sms_opt_in. The cron is harmless until any user opts in.
 on:
+  schedule:
+    # Daily at 13:00 UTC = 8am Eastern (DST), 9am EST. Catches items
+    # entering the 1-week band early in the day.
+    - cron: "0 13 * * *"
   workflow_dispatch:
 
 jobs:
