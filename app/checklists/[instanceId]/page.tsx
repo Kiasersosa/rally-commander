@@ -258,56 +258,108 @@ export default async function ChecklistInstancePage({
             page, then click &ldquo;Rebuild from templates&rdquo; on the event.
           </div>
         ) : (
-          <ul className="rc-list">
-            {state.items.map(({ item, signoff }, idx) => {
-              const mineSignedThis = signoff?.userId === me.userId;
+          (() => {
+            // For service_setup, group items by zone (and "(no zone)" bucket)
+            // so the crew can scan their assigned bay area. For other kinds,
+            // render flat.
+            const groupByZone =
+              meta.kind === "service_setup" &&
+              state.items.some(({ item }) => state.meta.get(item.id)?.zone);
+            const buckets = new Map<string, typeof state.items>();
+            if (groupByZone) {
+              for (const it of state.items) {
+                const zone = state.meta.get(it.item.id)?.zone ?? "(no zone)";
+                const arr = buckets.get(zone) ?? [];
+                arr.push(it);
+                buckets.set(zone, arr);
+              }
+            } else {
+              buckets.set("", state.items);
+            }
+            const zones = Array.from(buckets.keys()).sort((a, b) => {
+              if (a === "(no zone)") return 1;
+              if (b === "(no zone)") return -1;
+              return a.localeCompare(b);
+            });
+
+            return zones.map((zoneName) => {
+              const list = buckets.get(zoneName) ?? [];
               return (
-                <li key={item.id} className="rc-list-row">
-                  <div className="flex-1">
-                    <div className="font-medium">
-                      <span className="rc-muted mr-2 font-mono text-xs">
-                        {idx + 1}.
-                      </span>
-                      {item.label}
-                    </div>
-                    {item.description ? (
-                      <div className="rc-muted mt-0.5 text-sm">
-                        {item.description}
-                      </div>
-                    ) : null}
-                    {signoff ? (
-                      <div className="rc-muted mt-1 text-xs">
-                        ✓ Signed by {signoff.userName} ·{" "}
-                        {signoff.signedAt
-                          .toISOString()
-                          .replace("T", " ")
-                          .slice(0, 16)}
-                      </div>
-                    ) : null}
-                  </div>
-                  {signoff ? (
-                    mineSignedThis ? (
-                      <form action={unsignItem}>
-                        <input type="hidden" name="instance_item_id" value={item.id} />
-                        <button type="submit" className="rc-btn rc-btn-ghost text-xs">
-                          Undo
-                        </button>
-                      </form>
-                    ) : (
-                      <span className="rc-muted text-xs">Signed</span>
-                    )
-                  ) : (
-                    <form action={signItem}>
-                      <input type="hidden" name="instance_item_id" value={item.id} />
-                      <button type="submit" className="rc-btn rc-btn-primary text-sm">
-                        Sign off
-                      </button>
-                    </form>
-                  )}
-                </li>
+                <section key={zoneName || "_"} className="mb-5">
+                  {groupByZone && zoneName ? (
+                    <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide rc-muted">
+                      {zoneName} ({list.filter((l) => l.signoff).length}/{list.length})
+                    </h3>
+                  ) : null}
+                  <ul className="rc-list">
+                    {list.map(({ item, signoff }, idx) => {
+                      const mineSignedThis = signoff?.userId === me.userId;
+                      const itemMeta = state.meta.get(item.id);
+                      return (
+                        <li key={item.id} className="rc-list-row !items-start">
+                          <div className="flex-1">
+                            <div className="font-medium">
+                              <span className="rc-muted mr-2 font-mono text-xs">
+                                {idx + 1}.
+                              </span>
+                              {item.label}
+                            </div>
+                            {(itemMeta?.targetRole || (itemMeta?.toolNames.length ?? 0) > 0) ? (
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                                {itemMeta?.targetRole ? (
+                                  <span className="rc-badge rc-badge-prep">
+                                    {itemMeta.targetRole.replace(/_/g, " ")}
+                                  </span>
+                                ) : null}
+                                {itemMeta && itemMeta.toolNames.length > 0 ? (
+                                  <span className="rc-muted">
+                                    🛠 {itemMeta.toolNames.join(", ")}
+                                  </span>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            {item.description ? (
+                              <div className="rc-muted mt-1 text-sm">
+                                {item.description}
+                              </div>
+                            ) : null}
+                            {signoff ? (
+                              <div className="rc-muted mt-1 text-xs">
+                                ✓ Signed by {signoff.userName} ·{" "}
+                                {signoff.signedAt
+                                  .toISOString()
+                                  .replace("T", " ")
+                                  .slice(0, 16)}
+                              </div>
+                            ) : null}
+                          </div>
+                          {signoff ? (
+                            mineSignedThis ? (
+                              <form action={unsignItem}>
+                                <input type="hidden" name="instance_item_id" value={item.id} />
+                                <button type="submit" className="rc-btn rc-btn-ghost text-xs">
+                                  Undo
+                                </button>
+                              </form>
+                            ) : (
+                              <span className="rc-muted text-xs">Signed</span>
+                            )
+                          ) : (
+                            <form action={signItem}>
+                              <input type="hidden" name="instance_item_id" value={item.id} />
+                              <button type="submit" className="rc-btn rc-btn-primary text-sm">
+                                Sign off
+                              </button>
+                            </form>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
               );
-            })}
-          </ul>
+            });
+          })()
         )}
       </main>
     </>

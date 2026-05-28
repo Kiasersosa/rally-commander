@@ -1,6 +1,6 @@
 // Server-side helpers that bridge the pure ChecklistEngine to the DB.
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "./db";
 import {
   checklistInstanceItems,
@@ -8,9 +8,11 @@ import {
   checklistSignoffs,
   checklistTemplateItems,
   checklistTemplates,
+  equipmentItems,
   users,
   vehicles,
   type ChecklistKind,
+  type UserRole,
 } from "./db/schema";
 import { deriveState, type EngineItem, type EngineSignoff } from "./checklist-engine";
 
@@ -18,13 +20,35 @@ export const KIND_LABEL: Record<ChecklistKind, string> = {
   pre_event_inspection: "Pre-event inspection",
   post_event_teardown: "Post-event teardown",
   packing: "Packing",
+  service_setup: "Service-area setup",
 };
 
 export const ALL_KINDS: readonly ChecklistKind[] = [
   "pre_event_inspection",
   "post_event_teardown",
   "packing",
+  "service_setup",
 ] as const;
+
+/** Parse a JSON-stringified UUID array safely (returns []). */
+export function parseToolIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((x): x is string => typeof x === "string");
+    }
+  } catch {
+    /* fall through */
+  }
+  return [];
+}
+
+/** Stringify a UUID array for storage; returns null when empty. */
+export function stringifyToolIds(ids: string[]): string | null {
+  if (ids.length === 0) return null;
+  return JSON.stringify(ids);
+}
 
 /**
  * For each (active vehicle × kind) on the team that has a template, ensure
@@ -101,6 +125,9 @@ export async function instantiateChecklistsForEvent(
             orderIndex: it.orderIndex,
             label: it.label,
             description: it.description,
+            zone: it.zone,
+            targetRole: it.targetRole,
+            toolsNeeded: it.toolsNeeded,
           })),
         );
       }
@@ -111,10 +138,24 @@ export async function instantiateChecklistsForEvent(
   return { created };
 }
 
+export type ChecklistItemMeta = {
+  zone: string | null;
+  targetRole: UserRole | null;
+  toolNames: string[];
+};
+
+export type EnrichedChecklistState = ReturnType<typeof deriveState> & {
+  meta: Map<string, ChecklistItemMeta>;
+};
+
 /**
- * Load the full state of a checklist instance via the pure ChecklistEngine.
+ * Load the full state of a checklist instance via the pure ChecklistEngine,
+ * plus per-item metadata (zone, target role, resolved tool names).
  */
-export async function loadChecklistState(teamId: string, instanceId: string) {
+export async function loadChecklistState(
+  teamId: string,
+  instanceId: string,
+): Promise<EnrichedChecklistState> {
   const items = await db
     .select()
     .from(checklistInstanceItems)
@@ -137,6 +178,24 @@ export async function loadChecklistState(teamId: string, instanceId: string) {
     .innerJoin(users, eq(users.id, checklistSignoffs.userId))
     .where(eq(checklistSignoffs.teamId, teamId));
 
+  // Collect all referenced tool IDs and resolve to names in a single query.
+  const allToolIds = Array.from(
+    new Set(items.flatMap((i) => parseToolIds(i.toolsNeeded))),
+  );
+  const toolNameById = new Map<string, string>();
+  if (allToolIds.length > 0) {
+    const tools = await db
+      .select({ id: equipmentItems.id, description: equipmentItems.description })
+      .from(equipmentItems)
+      .where(
+        and(
+          eq(equipmentItems.teamId, teamId),
+          inArray(equipmentItems.id, allToolIds),
+        ),
+      );
+    for (const t of tools) toolNameById.set(t.id, t.description);
+  }
+
   const engineItems: EngineItem[] = items.map((i) => ({
     id: i.id,
     orderIndex: i.orderIndex,
@@ -153,5 +212,17 @@ export async function loadChecklistState(teamId: string, instanceId: string) {
       signedAt: s.signedAt,
     }));
 
-  return deriveState(engineItems, engineSignoffs);
+  const base = deriveState(engineItems, engineSignoffs);
+  const meta = new Map<string, ChecklistItemMeta>();
+  for (const i of items) {
+    meta.set(i.id, {
+      zone: i.zone,
+      targetRole: i.targetRole,
+      toolNames: parseToolIds(i.toolsNeeded)
+        .map((id) => toolNameById.get(id))
+        .filter((n): n is string => Boolean(n)),
+    });
+  }
+
+  return { ...base, meta };
 }

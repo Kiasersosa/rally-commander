@@ -47,6 +47,7 @@ export const checklistKindEnum = pgEnum("checklist_kind", [
   "pre_event_inspection",
   "post_event_teardown",
   "packing",
+  "service_setup",
 ]);
 
 export const orderListStatusEnum = pgEnum("order_list_status", [
@@ -369,6 +370,12 @@ export const checklistTemplateItems = pgTable(
     orderIndex: integer("order_index").notNull(),
     label: text("label").notNull(),
     description: text("description"),
+    /** Optional bay zone label, e.g. "Front-left of car", "Tool bay", "Fuel area". */
+    zone: text("zone"),
+    /** Optional target role responsible (chief, lead_mechanic, etc.). */
+    targetRole: userRoleEnum("target_role"),
+    /** Optional JSON-stringified array of equipment_item UUIDs needed for this task. */
+    toolsNeeded: text("tools_needed"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -424,6 +431,12 @@ export const checklistInstanceItems = pgTable(
     orderIndex: integer("order_index").notNull(),
     label: text("label").notNull(),
     description: text("description"),
+    /** Snapshot of template's zone at instantiation time. */
+    zone: text("zone"),
+    /** Snapshot of template's target_role at instantiation time. */
+    targetRole: userRoleEnum("target_role"),
+    /** Snapshot of template's tools_needed (JSON UUID array). */
+    toolsNeeded: text("tools_needed"),
   },
   (t) => ({
     instanceIdx: index("checklist_instance_items_instance_idx").on(
