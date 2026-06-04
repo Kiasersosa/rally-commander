@@ -1014,11 +1014,57 @@ export default async function EventDetailPage({
           </div>
         </header>
 
+        {/* Sticky jump-to-section bar. Hover (desktop) or tap (mobile) any
+            pill to reveal an anchor menu, then click an item to scroll to
+            that section. Pure CSS — no JS. */}
+        <nav className="rc-page-subnav mb-6">
+          <span className="rc-page-subnav-label">Jump to:</span>
+          <div className="rc-nav-item">
+            <button type="button" className="rc-page-subnav-trigger">
+              Logistics ▾
+            </button>
+            <div className="rc-nav-dropdown">
+              <a href="#itinerary" className="rc-nav-dropdown-link">Itinerary</a>
+              <a href="#hotels" className="rc-nav-dropdown-link">Hotels</a>
+              <a href="#meal-plan" className="rc-nav-dropdown-link">Meal plan</a>
+            </div>
+          </div>
+          <div className="rc-nav-item">
+            <button type="button" className="rc-page-subnav-trigger">
+              Prep ▾
+            </button>
+            <div className="rc-nav-dropdown">
+              <a href="#checklists" className="rc-nav-dropdown-link">Checklists</a>
+              <a href="#parts" className="rc-nav-dropdown-link">Parts to order</a>
+              <a href="#tires" className="rc-nav-dropdown-link">Tires needed</a>
+              <a href="#recce" className="rc-nav-dropdown-link">Recce</a>
+            </div>
+          </div>
+          <div className="rc-nav-item">
+            <button type="button" className="rc-page-subnav-trigger">
+              Docs &amp; money ▾
+            </button>
+            <div className="rc-nav-dropdown">
+              <a href="#documents" className="rc-nav-dropdown-link">Documents</a>
+              <a href="#budget" className="rc-nav-dropdown-link">Budget</a>
+            </div>
+          </div>
+          <div className="rc-nav-item">
+            <button type="button" className="rc-page-subnav-trigger">
+              Crew ▾
+            </button>
+            <div className="rc-nav-dropdown">
+              <a href="#todos" className="rc-nav-dropdown-link">Todos</a>
+              <a href="#debrief" className="rc-nav-dropdown-link">Debrief</a>
+            </div>
+          </div>
+        </nav>
+
         <section className="rc-empty-section mb-10">
           {PHASE_HINT[event.phase]}
         </section>
 
-        <section className="mb-10">
+        <section id="itinerary" className="scroll-mt-32 mb-10">
           <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-lg font-semibold tracking-tight">Itinerary</h2>
             <div className="flex items-center gap-3 text-xs">
@@ -1200,7 +1246,7 @@ export default async function EventDetailPage({
           })()}
         </section>
 
-        <section className="mb-10">
+        <section id="documents" className="scroll-mt-32 mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Documents</h2>
           {!isStorageConfigured() ? (
             <div className="rc-card mb-4 border-amber-500/30 bg-amber-500/10 text-sm text-amber-700 dark:text-amber-300">
@@ -1292,7 +1338,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section className="mb-10">
+        <section id="budget" className="scroll-mt-32 mb-10">
           <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-lg font-semibold tracking-tight">Budget</h2>
             <div className="text-sm">
@@ -1494,7 +1540,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section className="mb-10">
+        <section id="recce" className="scroll-mt-32 mb-10">
           <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-lg font-semibold tracking-tight">Recce</h2>
             <Link
@@ -1712,7 +1758,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section className="mb-10">
+        <section id="hotels" className="scroll-mt-32 mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Hotels</h2>
           {isFullAccessRole(me.role) ? (
             <form action={addHotel} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
@@ -1798,7 +1844,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section className="mb-10">
+        <section id="meal-plan" className="scroll-mt-32 mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Meal plan</h2>
           {isFullAccessRole(me.role) ? (
             <form action={addMeal} className="rc-card mb-4 grid grid-cols-1 gap-2 sm:grid-cols-12">
@@ -1870,7 +1916,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section className="mb-10">
+        <section id="parts" className="scroll-mt-32 mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">
             Parts to order
           </h2>
@@ -1952,7 +1998,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section className="mb-10">
+        <section id="tires" className="scroll-mt-32 mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">
             Tires needed
           </h2>
@@ -2033,7 +2079,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section className="mb-10">
+        <section id="checklists" className="scroll-mt-32 mb-10">
           <div className="mb-4 flex items-baseline justify-between">
             <h2 className="text-lg font-semibold tracking-tight">Checklists</h2>
             {isFullAccessRole(me.role) ? (
@@ -2086,7 +2132,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section className="mb-10">
+        <section id="todos" className="scroll-mt-32 mb-10">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">
             {isFullAccessRole(me.role) ? "Event todos" : "My todos"}
           </h2>
@@ -2178,7 +2224,7 @@ export default async function EventDetailPage({
           )}
         </section>
 
-        <section>
+        <section id="debrief" className="scroll-mt-32">
           <h2 className="mb-4 text-lg font-semibold tracking-tight">
             Post-event debrief
           </h2>

@@ -353,6 +353,55 @@ body {
   margin: 0.25rem 0;
 }
 
+/* ---------- Sticky in-page sub-nav (jump-to-section pill bar) ---------- */
+
+.rc-page-subnav {
+  position: sticky;
+  /* sits just below the main top nav (rc-nav is ~48px tall + 1px border) */
+  top: 3.25rem;
+  z-index: 25;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 14px rgba(28, 25, 23, 0.08);
+  backdrop-filter: blur(12px) saturate(140%);
+}
+
+.rc-page-subnav-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+
+.rc-page-subnav-trigger {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.85rem;
+  border-radius: 9999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--foreground);
+  background: transparent;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: background-color 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.rc-page-subnav-trigger:hover,
+.rc-nav-item:focus-within .rc-page-subnav-trigger {
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ---------- Dialog / modal ---------- */
 
 .rc-dialog {
